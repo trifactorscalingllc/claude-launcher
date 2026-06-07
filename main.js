@@ -27,6 +27,7 @@ const DEFAULTS = {
   notifications: true, // desktop notifications (session finished, budget)
   archived: [],        // project paths hidden from the dashboard
   tags: {},            // { projectPath: "client"|"personal"|... }
+  routines: [],        // recurring `claude -p` tasks
 };
 
 const AI_CACHE_PATH = path.join(app.getPath('userData'), 'ai-summaries.json');
@@ -167,11 +168,98 @@ function checkBudgets() {
   }
 }
 
+// ---------- routines (recurring `claude -p` tasks) ----------
+let claudeBin = null;
+function resolveClaudeBin() {
+  if (claudeBin) return claudeBin;
+  try {
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    const r = spawnSync(finder, ['claude'], { encoding: 'utf8' });
+    if (r.status === 0 && r.stdout) { claudeBin = r.stdout.split(/\r?\n/)[0].trim(); return claudeBin; }
+  } catch {}
+  const candidates = process.platform === 'win32'
+    ? [path.join(HOME, '.local', 'bin', 'claude.exe')]
+    : [path.join(HOME, '.local', 'bin', 'claude'), '/usr/local/bin/claude', '/opt/homebrew/bin/claude'];
+  for (const c of candidates) { try { if (fs.existsSync(c)) { claudeBin = c; return c; } } catch {} }
+  claudeBin = 'claude';
+  return claudeBin;
+}
+
+function updateRoutine(id, patch) {
+  const cfg = loadConfig();
+  const r = (cfg.routines || []).find((x) => x.id === id);
+  if (r) { Object.assign(r, patch); saveConfig(cfg); }
+}
+function sendRoutines() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('routines-updated');
+}
+
+const runningRoutines = new Set();
+function runRoutine(routine) {
+  if (runningRoutines.has(routine.id)) return;
+  runningRoutines.add(routine.id);
+  updateRoutine(routine.id, { lastStatus: 'running' });
+  sendRoutines();
+
+  const bin = resolveClaudeBin();
+  const args = ['-p', routine.prompt];
+  if (routine.model && routine.model !== 'default') args.push('--model', routine.model);
+  if (routine.autonomous) args.push('--permission-mode', 'acceptEdits');
+
+  let out = '', err = '';
+  let child;
+  try {
+    child = spawn(bin, args, { cwd: routine.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  } catch (e) {
+    runningRoutines.delete(routine.id);
+    finishRoutine(routine.id, 'error', '', e.message);
+    return;
+  }
+  const timer = setTimeout(() => { try { child.kill(); } catch {} }, 10 * 60 * 1000);
+  child.stdout.on('data', (d) => { out += d; if (out.length > 24000) out = out.slice(-24000); });
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('error', (e) => { clearTimeout(timer); runningRoutines.delete(routine.id); finishRoutine(routine.id, 'error', '', e.message); });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    runningRoutines.delete(routine.id);
+    const status = code === 0 ? 'ok' : 'error';
+    finishRoutine(routine.id, status, out.trim(), status === 'error' ? (err.trim() || `exited with code ${code}`) : '');
+  });
+}
+function finishRoutine(id, status, output, error) {
+  updateRoutine(id, { lastRun: Date.now(), lastStatus: status, lastOutput: output, lastError: error });
+  sendRoutines();
+  const r = (loadConfig().routines || []).find((x) => x.id === id);
+  if (r) notify(status === 'ok' ? `Routine done — ${r.name}` : `Routine failed — ${r.name}`,
+    status === 'ok' ? (output.slice(0, 140) || 'Completed.') : (error.slice(0, 140) || 'See the Routines tab.'));
+}
+
+function routineDue(r, now) {
+  if (!r.enabled) return false;
+  const s = r.schedule || {};
+  if (s.type === 'daily') {
+    const [hh, mm] = String(s.time || '09:00').split(':').map(Number);
+    const target = new Date(); target.setHours(hh || 0, mm || 0, 0, 0);
+    return now >= target.getTime() && (r.lastRun || 0) < target.getTime();
+  }
+  // interval (hours)
+  const ms = Math.max(1, Number(s.hours) || 24) * 3600000;
+  return !r.lastRun || (now - r.lastRun) >= ms;
+}
+function checkRoutines() {
+  const cfg = loadConfig();
+  const now = Date.now();
+  for (const r of (cfg.routines || [])) {
+    if (routineDue(r, now) && !runningRoutines.has(r.id)) runRoutine(r);
+  }
+}
+
 function tick() {
   if (!indexer.loaded) return;
   updateTray();
   checkActivity();
   checkBudgets();
+  checkRoutines();
 }
 
 // ---------- config ----------
@@ -741,6 +829,41 @@ ipcMain.handle('budget-status', () => {
 });
 
 ipcMain.handle('model-spend', () => indexer.modelSpend());
+
+// ---- routines ----
+ipcMain.handle('get-routines', () => loadConfig().routines || []);
+ipcMain.handle('save-routine', (_e, routine) => {
+  const cfg = loadConfig();
+  if (!cfg.routines) cfg.routines = [];
+  if (routine.id) {
+    const i = cfg.routines.findIndex((r) => r.id === routine.id);
+    if (i >= 0) cfg.routines[i] = { ...cfg.routines[i], ...routine };
+    else cfg.routines.push(routine);
+  } else {
+    routine.id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    routine.lastRun = 0; routine.lastStatus = ''; routine.lastOutput = ''; routine.lastError = '';
+    cfg.routines.push(routine);
+  }
+  saveConfig(cfg);
+  return cfg.routines;
+});
+ipcMain.handle('delete-routine', (_e, id) => {
+  const cfg = loadConfig();
+  cfg.routines = (cfg.routines || []).filter((r) => r.id !== id);
+  saveConfig(cfg);
+  return cfg.routines;
+});
+ipcMain.handle('toggle-routine', (_e, id) => {
+  const cfg = loadConfig();
+  const r = (cfg.routines || []).find((x) => x.id === id);
+  if (r) { r.enabled = !r.enabled; saveConfig(cfg); }
+  return cfg.routines;
+});
+ipcMain.handle('run-routine', (_e, id) => {
+  const r = (loadConfig().routines || []).find((x) => x.id === id);
+  if (r) runRoutine(r);
+  return true;
+});
 
 ipcMain.handle('toggle-archive', (_e, projectPath) => {
   const cfg = loadConfig();

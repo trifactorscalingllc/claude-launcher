@@ -666,26 +666,122 @@ async function loadContext() {
 }
 
 // ---------- Routines view (draft) ----------
-function loadRoutines() {
-  const body = $('routines-body');
-  const ideas = [
-    ['Daily standup digest', 'Every morning, summarize what changed across your active projects and what\'s next.'],
-    ['Weekly retro', 'Each Friday, roll up the week\'s commits, time, and cost into a short report.'],
-    ['Watch a deploy / CI', 'Poll a build or deploy on an interval and ping you when it finishes or breaks.'],
-    ['Inbox / lead sweep', 'Pull new form submissions or emails into a project on a schedule.'],
-    ['Project health check', 'Periodically run tests / lint across a project and flag regressions.'],
-  ];
-  body.innerHTML = `
-    <div class="panel routines-hero">
-      <div class="r-badge">Draft · coming soon</div>
-      <div class="panel-title" style="font-size:17px">Recurring Claude tasks, on a schedule</div>
-      <p class="panel-sub">Routines will let you set Claude Code tasks to run on an interval or cron — a morning digest, a weekly retro, a deploy watcher — and surface the results right here. Backed by Claude's scheduling + loop capabilities.</p>
-      <button class="btn primary" disabled style="opacity:.55;cursor:default">${svg('plus', 16)} New routine</button>
+const ROUTINE_IDEAS = [
+  ['Daily standup digest', 'Summarize what changed in this project today (git + files) and what to do next.'],
+  ['Weekly retro', 'Roll up this week\'s commits and progress into a short report with wins and risks.'],
+  ['README freshness check', 'Check whether the README is out of date vs the code and list what to update.'],
+  ['Test/health check', 'Run the test suite and summarize failures, or list the riskiest untested areas.'],
+];
+
+function scheduleText(r) {
+  const s = r.schedule || {};
+  return s.type === 'daily' ? `Daily at ${s.time || '09:00'}` : `Every ${s.hours || 24}h`;
+}
+function routineCard(r) {
+  const proj = (r.projectPath || '').split(/[\\/]/).pop() || '—';
+  const badge = r.lastStatus === 'running' ? '<span class="rstat run">running…</span>'
+    : r.lastStatus === 'ok' ? '<span class="rstat ok">ok</span>'
+    : r.lastStatus === 'error' ? '<span class="rstat err">error</span>' : '';
+  const output = r.lastError ? r.lastError : r.lastOutput;
+  return `<div class="routine ${r.enabled ? '' : 'off'}" data-id="${r.id}">
+    <div class="routine-head">
+      <div class="routine-info">
+        <div class="routine-name">${escapeHtml(r.name)} ${badge}</div>
+        <div class="routine-meta">${escapeHtml(proj)} · ${scheduleText(r)} · ${r.model && r.model !== 'default' ? r.model : 'default model'}${r.lastRun ? ` · last ${relTime(r.lastRun)}` : ' · never run'}</div>
+      </div>
+      <label class="rtoggle"><input type="checkbox" class="r-en" ${r.enabled ? 'checked' : ''} /><span class="track"></span></label>
     </div>
-    <div class="section-head">${svg('bulb', 15)} Ideas to start with</div>
-    <div class="mem-grid">
-      ${ideas.map(([t, d]) => `<div class="mem"><div class="mem-title">${t}</div><div class="mem-body open">${d}</div></div>`).join('')}
+    <div class="routine-prompt">${escapeHtml(r.prompt)}</div>
+    ${output ? `<div class="routine-output ${r.lastError ? 'err' : ''}">${escapeHtml(output)}</div>` : ''}
+    <div class="routine-actions">
+      <button class="btn primary r-run">${svg('bolt', 15)} Run now</button>
+      <button class="icon-btn r-edit" title="Edit">${svg('edit', 16)}</button>
+      <button class="icon-btn r-del" title="Delete">${svg('archive', 16)}</button>
+    </div>
+  </div>`;
+}
+
+async function loadRoutines() {
+  const body = $('routines-body');
+  const routines = await window.launcher.getRoutines();
+  let html = `<div class="routines-top">
+      <p class="section-note" style="margin:0">Recurring Claude Code tasks. Each runs <code>claude -p</code> in a project on your schedule and shows the result here.</p>
+      <button id="newRoutine" class="btn primary">${svg('plus', 16)} New routine</button>
     </div>`;
+  if (!routines.length) {
+    html += `<div class="panel routines-hero">
+        <div class="panel-title" style="font-size:16px">No routines yet</div>
+        <p class="panel-sub">Create one, or start from an idea below.</p>
+      </div>
+      <div class="section-head">${svg('bulb', 15)} Ideas to start with</div>
+      <div class="mem-grid">
+        ${ROUTINE_IDEAS.map(([t, d], i) => `<div class="mem idea" data-i="${i}"><div class="mem-title">${t}</div><div class="mem-body open">${d}</div><div class="idea-add">+ Use this</div></div>`).join('')}
+      </div>`;
+  } else {
+    html += `<div class="routine-list">${routines.map(routineCard).join('')}</div>`;
+  }
+  body.innerHTML = html;
+
+  $('newRoutine').addEventListener('click', () => openRoutineModal());
+  body.querySelectorAll('.mem.idea').forEach((el) => el.addEventListener('click', () => {
+    const [name, prompt] = ROUTINE_IDEAS[Number(el.dataset.i)];
+    openRoutineModal({ name, prompt });
+  }));
+  body.querySelectorAll('.routine').forEach((el) => {
+    const id = el.dataset.id;
+    const r = routines.find((x) => x.id === id);
+    el.querySelector('.r-run').addEventListener('click', async () => { await window.launcher.runRoutine(id); showStatus('Running routine…', 'ok'); });
+    el.querySelector('.r-edit').addEventListener('click', () => openRoutineModal(r));
+    el.querySelector('.r-del').addEventListener('click', async () => { if (confirm(`Delete routine "${r.name}"?`)) { await window.launcher.deleteRoutine(id); loadRoutines(); } });
+    el.querySelector('.r-en').addEventListener('change', async () => { await window.launcher.toggleRoutine(id); });
+  });
+}
+
+let editingRoutine = null;
+function openRoutineModal(routine) {
+  editingRoutine = routine && routine.id ? routine : null;
+  const m = $('routineModal');
+  $('rmTitle').textContent = editingRoutine ? 'Edit routine' : 'New routine';
+  // populate project select
+  const sel = $('rmProject');
+  const all = [...projects, ...externalProjects].filter((p, i, a) => a.findIndex((x) => x.path === p.path) === i).sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = all.map((p) => `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name)}</option>`).join('');
+  $('rmName').value = routine ? (routine.name || '') : '';
+  $('rmPrompt').value = routine ? (routine.prompt || '') : '';
+  if (routine && routine.projectPath) sel.value = routine.projectPath;
+  const sched = (routine && routine.schedule) || { type: 'interval', hours: 24 };
+  $('rmSchedType').value = sched.type || 'interval';
+  $('rmHours').value = sched.hours || 24;
+  $('rmTime').value = sched.time || '09:00';
+  $('rmModel').value = (routine && routine.model) || 'default';
+  $('rmAutonomous').checked = !!(routine && routine.autonomous);
+  $('rmEnabled').checked = routine ? routine.enabled !== false : true;
+  syncSchedFields();
+  m.classList.remove('hidden');
+  $('rmName').focus();
+}
+function syncSchedFields() {
+  const daily = $('rmSchedType').value === 'daily';
+  $('rmIntervalWrap').classList.toggle('hidden', daily);
+  $('rmTimeWrap').classList.toggle('hidden', !daily);
+}
+async function saveRoutineFromModal() {
+  const name = $('rmName').value.trim();
+  const prompt = $('rmPrompt').value.trim();
+  const projectPath = $('rmProject').value;
+  if (!name || !prompt || !projectPath) { showStatus('Name, project, and prompt are required.', 'error'); return; }
+  const type = $('rmSchedType').value;
+  const schedule = type === 'daily' ? { type: 'daily', time: $('rmTime').value || '09:00' } : { type: 'interval', hours: Math.max(1, Number($('rmHours').value) || 24) };
+  const r = {
+    ...(editingRoutine || {}),
+    name, prompt, projectPath, schedule,
+    model: $('rmModel').value,
+    autonomous: $('rmAutonomous').checked,
+    enabled: $('rmEnabled').checked,
+  };
+  await window.launcher.saveRoutine(r);
+  $('routineModal').classList.add('hidden');
+  loadRoutines();
 }
 
 // ---------- detail view (Phase 3) ----------
@@ -1063,6 +1159,13 @@ async function init() {
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.addEventListener('click', () => loadOverview(Number(b.dataset.days))));
   $('openMemory').addEventListener('click', () => window.launcher.openMemoryFolder());
+
+  // routine editor
+  $('rmCancel').addEventListener('click', () => $('routineModal').classList.add('hidden'));
+  $('rmSave').addEventListener('click', saveRoutineFromModal);
+  $('rmSchedType').addEventListener('change', syncSchedFields);
+  $('routineModal').addEventListener('click', (e) => { if (e.target === $('routineModal')) $('routineModal').classList.add('hidden'); });
+  window.launcher.onRoutinesUpdated(() => { if (!$('view-routines').classList.contains('hidden')) loadRoutines(); });
 
   $('search').addEventListener('input', (e) => { filter = e.target.value.trim().toLowerCase(); render(); });
   $('newBtn').addEventListener('click', openModal);

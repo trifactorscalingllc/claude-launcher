@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('launcher', {
   setNotifications: (on) => ipcRenderer.invoke('set-notifications', on),
   budgetStatus: () => ipcRenderer.invoke('budget-status'),
   modelSpend: () => ipcRenderer.invoke('model-spend'),
+  getRoutines: () => ipcRenderer.invoke('get-routines'),
+  saveRoutine: (r) => ipcRenderer.invoke('save-routine', r),
+  deleteRoutine: (id) => ipcRenderer.invoke('delete-routine', id),
+  toggleRoutine: (id) => ipcRenderer.invoke('toggle-routine', id),
+  runRoutine: (id) => ipcRenderer.invoke('run-routine', id),
+  onRoutinesUpdated: (cb) => {
+    const h = () => cb();
+    ipcRenderer.on('routines-updated', h);
+    return () => ipcRenderer.removeListener('routines-updated', h);
+  },
   toggleArchive: (projectPath) => ipcRenderer.invoke('toggle-archive', projectPath),
   setTag: (projectPath, tag) => ipcRenderer.invoke('set-tag', { projectPath, tag }),
   openInEditor: (projectPath) => ipcRenderer.invoke('open-in-editor', projectPath),

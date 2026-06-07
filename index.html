@@ -313,6 +313,41 @@
     <button id="updateInstall" class="btn primary hidden">Restart &amp; update</button>
   </div>
 
+  <!-- Routine editor -->
+  <div id="routineModal" class="modal-overlay hidden">
+    <div class="modal routine-modal">
+      <h3 id="rmTitle">New routine</h3>
+      <p class="modal-sub">Runs <code>claude -p "…"</code> in the project on a schedule and shows the result here.</p>
+      <label class="field"><span>Name</span><input id="rmName" type="text" placeholder="Daily standup digest" autocomplete="off" /></label>
+      <label class="field"><span>Project</span><select id="rmProject"></select></label>
+      <label class="field"><span>Prompt</span><textarea id="rmPrompt" rows="4" placeholder="Summarize what changed in this project today and what's next."></textarea></label>
+      <div class="rm-grid">
+        <label class="field"><span>Schedule</span>
+          <select id="rmSchedType"><option value="interval">Every N hours</option><option value="daily">Daily at…</option></select>
+        </label>
+        <label class="field" id="rmIntervalWrap"><span>Hours</span><input id="rmHours" type="number" min="1" value="24" /></label>
+        <label class="field hidden" id="rmTimeWrap"><span>Time</span><input id="rmTime" type="time" value="09:00" /></label>
+        <label class="field"><span>Model</span>
+          <select id="rmModel"><option value="default">Default</option><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></select>
+        </label>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="rmAutonomous" />
+        <span class="track"></span>
+        <span class="toggle-text"><strong>Autonomous (allow edits)</strong><em>Adds <code>--permission-mode acceptEdits</code> so it can change files. Off = read-only (digests, reports).</em></span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="rmEnabled" checked />
+        <span class="track"></span>
+        <span class="toggle-text"><strong>Enabled</strong><em>Run automatically on schedule.</em></span>
+      </label>
+      <div class="modal-actions">
+        <button id="rmCancel" class="btn ghost">Cancel</button>
+        <button id="rmSave" class="btn primary">Save routine</button>
+      </div>
+    </div>
+  </div>
+
   <!-- First-run onboarding -->
   <div id="onboard" class="modal-overlay hidden">
     <div class="modal onboard-modal">
