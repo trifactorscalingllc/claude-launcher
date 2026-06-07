@@ -8,7 +8,7 @@
 Monitor, search, and launch every project — time, cost, transcripts, and context, all in one place.
 
 [![Latest release](https://img.shields.io/github/v/release/trifactorscalingllc/claude-helm?color=d97757&label=download)](https://github.com/trifactorscalingllc/claude-helm/releases/latest)
-![Platform](https://img.shields.io/badge/platform-Windows-444)
+![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-444)
 ![Local only](https://img.shields.io/badge/data-100%25%20local-4f7d5b)
 ![License](https://img.shields.io/badge/license-MIT-444)
 
@@ -26,7 +26,16 @@ way to jump back in.** It runs entirely on your machine, and it auto-updates its
 
 ## Download
 
-**[⬇ Download the latest installer](https://github.com/trifactorscalingllc/claude-helm/releases/latest)** → run it → click **More info → Run anyway** at the SmartScreen prompt _(the app isn't code-signed yet)_. After that, it **updates itself silently** — no reinstalling.
+**[⬇ Get the latest release](https://github.com/trifactorscalingllc/claude-helm/releases/latest)** — Windows, macOS, and Linux:
+
+| Platform | File | First-run note |
+|---|---|---|
+| **Windows** | `Claude-Helm-Setup-*.exe` | SmartScreen → **More info → Run anyway**. Then it **updates itself silently.** |
+| **macOS (Apple Silicon)** | `Claude-Helm-*-arm64.dmg` | Right-click the app → **Open** (unsigned, so Gatekeeper warns once). |
+| **macOS (Intel)** | `Claude-Helm-*-x64.dmg` | Same as above. |
+| **Linux** | `Claude-Helm-*.AppImage` | `chmod +x` then run. |
+
+_The apps aren't code-signed yet, so each OS shows a one-time "unidentified developer" prompt. Windows auto-updates in place; macOS/Linux re-download to update until signed._
 
 ---
 
@@ -81,7 +90,7 @@ way to jump back in.** It runs entirely on your machine, and it auto-updates its
 - **Daily AI recap** — "what did I do today / this week" across all projects.
 - **Git status on cards** — branch, dirty/clean, ahead/behind, last commit.
 - **Real billed usage** via an Anthropic Admin API key (exact numbers for API/Console users).
-- **macOS & Linux** builds.
+- **Code-signing** (removes the one-time "unidentified developer" prompts and enables macOS auto-update).
 
 ---
 
