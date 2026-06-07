@@ -54,6 +54,10 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 - **Git status on cards** — current branch, dirty/clean, and ahead/behind your upstream, with the last commit on hover.
 - **Today's recap** — an end-of-day, AI-written standup of what you worked on across every project (with a factual fallback when no API key is set).
 - **Launch at login** — optionally start with your computer and sit in the tray, always monitoring.
+- **Live "Active now" panel** — the session running this second, with a ticking timer and running token/cost counter.
+- **⌘K command palette** — jump to any project, run a search, or switch tabs from the keyboard.
+- **Deeper analytics** — cache-hit rate, $/turn, tokens/turn, week-over-week trends, busiest hour/day, and a most-expensive-sessions leaderboard.
+- **Encrypted keys + real billing** — API keys are stored in your OS keychain (never plaintext); add an org Admin key to pull your *actual* billed month-to-date cost.
 - **System tray** — today's time + cost at a glance, plus an active-session indicator. Closing the window keeps it monitoring in the tray.
 - **Desktop notifications** + **cost alerts** — get warned when a session finishes and when you hit 80%/100% of a weekly/monthly **budget**.
 - **Overview** — range selector (1D/7D/1M/3M), per-project history chart, **spend forecast**, **spend-by-model**, 30-day heatmap, and **CSV export**.
@@ -90,9 +94,8 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 
 ## 🔜 Coming soon
 
-- **Command palette** (Ctrl-K) to jump anywhere from the keyboard.
 - **Weekly recap** — roll today's recap up into a "what did I do this week" digest.
-- **Real billed usage** via an Anthropic Admin API key (exact numbers for API/Console users).
+- **Project notes** — your own freeform notes per project.
 - **Code-signing** (removes the one-time "unidentified developer" prompts and enables macOS auto-update).
 
 ---

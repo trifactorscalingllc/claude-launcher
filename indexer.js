@@ -448,6 +448,90 @@ class Indexer {
     return out;
   }
 
+  // The single most-recently-active session (for the live "Active now" panel),
+  // or null if nothing has been touched within `withinMs`.
+  activeSession(withinMs = 150000) {
+    const now = Date.now();
+    let best = null;
+    for (const cwd in this.store.projects) {
+      const p = this.store.projects[cwd];
+      for (const id in p.sessions) {
+        const s = p.sessions[id];
+        if (!s.lastTs || now - s.lastTs >= withinMs) continue;
+        if (!best || s.lastTs > best.lastTs) {
+          const tok = s.tokens || { in: 0, out: 0, cw: 0, cr: 0 };
+          best = {
+            path: cwd, name: cwd.split(/[\\/]/).pop() || cwd, sessionId: id,
+            firstTs: s.firstTs, lastTs: s.lastTs, activeMs: s.activeMs, turns: s.turns,
+            cost: s.cost, tokens: tok.in + tok.out + tok.cw + tok.cr,
+            model: Object.keys(s.models || {}).sort((a, b) => s.models[b] - s.models[a])[0] || '',
+          };
+        }
+      }
+    }
+    return best;
+  }
+
+  // Deeper analytics for the Overview: efficiency, week-over-week trend,
+  // busiest hour/day, and the most expensive / longest sessions.
+  insights() {
+    let tin = 0, tout = 0, tcw = 0, tcr = 0, tcost = 0, tturns = 0;
+    const sessions = [];
+    const hourBuckets = new Array(24).fill(0);
+    const dowBuckets = new Array(7).fill(0);
+    for (const cwd in this.store.projects) {
+      const p = this.store.projects[cwd];
+      const nm = cwd.split(/[\\/]/).pop() || cwd;
+      for (const id in p.sessions) {
+        const s = p.sessions[id];
+        const tk = s.tokens || { in: 0, out: 0, cw: 0, cr: 0 };
+        tin += tk.in; tout += tk.out; tcw += tk.cw; tcr += tk.cr; tcost += s.cost; tturns += s.turns;
+        sessions.push({ name: nm, path: cwd, sessionId: id, title: s.title || '', cost: s.cost, activeMs: s.activeMs, turns: s.turns, lastTs: s.lastTs });
+      }
+      const h = p.hourly || {};
+      for (const k in h) {
+        const hr = Number(k.slice(-2));
+        const dt = new Date(k.slice(0, 10));
+        if (!isNaN(hr)) hourBuckets[hr] += h[k].activeMs || 0;
+        if (!isNaN(dt.getTime())) dowBuckets[dt.getDay()] += h[k].activeMs || 0;
+      }
+    }
+    const inputSide = tin + tcr;
+    const cacheHit = inputSide > 0 ? tcr / inputSide : 0;
+    const totalTokens = tin + tout + tcw + tcr;
+    let bh = 0; for (let i = 1; i < 24; i++) if (hourBuckets[i] > hourBuckets[bh]) bh = i;
+    let bd = 0; for (let i = 1; i < 7; i++) if (dowBuckets[i] > dowBuckets[bd]) bd = i;
+    return {
+      cacheHit,
+      costPerTurn: tturns > 0 ? tcost / tturns : 0,
+      tokensPerTurn: tturns > 0 ? totalTokens / tturns : 0,
+      totalTokens, totalCost: tcost, totalTurns: tturns,
+      busiestHour: bh, busiestHourMs: hourBuckets[bh],
+      busiestDow: bd, busiestDowMs: dowBuckets[bd],
+      anyHourly: hourBuckets.some((v) => v > 0),
+      wow: this._wow(),
+      topByCost: [...sessions].sort((a, b) => b.cost - a.cost).slice(0, 5),
+      topByTime: [...sessions].sort((a, b) => b.activeMs - a.activeMs).slice(0, 5),
+    };
+  }
+
+  _wow() {
+    const day = 86400000, now = Date.now();
+    const thisStart = now - 7 * day, lastStart = now - 14 * day;
+    let tc = 0, ta = 0, lc = 0, la = 0;
+    for (const cwd in this.store.projects) {
+      const p = this.store.projects[cwd];
+      for (const id in p.sessions) {
+        const s = p.sessions[id];
+        if (!s.lastTs) continue;
+        if (s.lastTs >= thisStart) { tc += s.cost; ta += s.activeMs; }
+        else if (s.lastTs >= lastStart) { lc += s.cost; la += s.activeMs; }
+      }
+    }
+    const pct = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100) : (cur > 0 ? 100 : 0));
+    return { thisCost: tc, lastCost: lc, costPct: pct(tc, lc), thisMs: ta, lastMs: la, msPct: pct(ta, la) };
+  }
+
   // For the session-finished notifier: latest activity timestamp per project.
   lastActivityMap() {
     const out = {};

@@ -743,10 +743,54 @@ body.redact .routine-output,
 body.redact .t-text,
 body.redact .t-result,
 body.redact .kv .file-name,
+body.redact .lead-name,
 body.redact .recap-list {
   filter: blur(6px);
   transition: filter 0.15s ease;
 }
+
+/* ---- real billed usage ---- */
+.billing-amt { font-size: 30px; font-weight: 800; color: var(--good); letter-spacing: -0.01em; }
+
+/* ---- insights: trends + leaderboard ---- */
+.delta { font-size: 11px; font-weight: 600; margin-left: 6px; white-space: nowrap; }
+.delta.up { color: var(--clay-deep); }
+.delta.down { color: var(--good); }
+.delta.new { color: var(--muted); }
+.lead-row { cursor: pointer; border-radius: 6px; }
+.lead-row:hover { background: rgba(217,119,87,0.08); }
+.lead-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
+
+/* ---- live "Active now" panel ---- */
+.active-panel { border: 1px solid var(--clay-soft); background: linear-gradient(180deg, rgba(217,119,87,0.07), transparent);
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
+.ap-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--clay-deep); }
+.ap-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--clay); box-shadow: 0 0 0 0 rgba(217,119,87,0.6); animation: apPulse 1.8s infinite; }
+@keyframes apPulse { 0% { box-shadow: 0 0 0 0 rgba(217,119,87,0.55); } 70% { box-shadow: 0 0 0 7px rgba(217,119,87,0); } 100% { box-shadow: 0 0 0 0 rgba(217,119,87,0); } }
+.ap-model { margin-left: auto; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.ap-name { font-size: 17px; font-weight: 700; color: var(--ink); margin: 6px 0 4px; }
+.ap-stats { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.ap-clock { font-weight: 700; color: var(--clay-deep); font-size: 15px; }
+.ap-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ---- command palette (⌘K) ---- */
+.palette-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(20,16,12,0.34);
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; animation: pageIn 0.12s ease; }
+.palette { width: min(620px, 92vw); background: var(--paper); border: 1px solid var(--line);
+  border-radius: 13px; box-shadow: 0 24px 70px rgba(0,0,0,0.32); overflow: hidden; }
+.palette-input-row { display: flex; align-items: center; gap: 10px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.palette-ico { width: 8px; height: 8px; border-radius: 50%; background: var(--clay); flex-shrink: 0; }
+#paletteInput { flex: 1; border: none; outline: none; background: transparent; font-size: 15.5px; color: var(--ink); font-family: inherit; }
+.palette-esc { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; }
+.palette-list { max-height: 56vh; overflow-y: auto; padding: 6px; }
+.palette-item { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 8px; cursor: pointer; }
+.palette-item.sel { background: var(--clay-faint, rgba(217,119,87,0.12)); }
+.palette-i-ico { color: var(--clay-deep); display: flex; flex-shrink: 0; }
+.palette-i-label { flex: 1; font-size: 13.5px; color: var(--ink); min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.palette-i-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-i-hint { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }
+.palette-empty { padding: 20px; text-align: center; color: var(--muted); font-size: 13px; }
 
 /* ---- cost estimate labelling ---- */
 .est { font-size: 0.82em; opacity: 0.6; font-weight: 500; letter-spacing: 0.02em; cursor: help; }

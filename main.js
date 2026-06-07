@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu, nativeImage, Notification, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -32,6 +32,7 @@ const DEFAULTS = {
   redact: false,       // blur descriptions for screenshots/screen-sharing (off by default)
   openAtLogin: false,  // launch Claude Helm when you log in
   startHidden: false,  // when launched at login, start minimized to the tray
+  adminKey: '',        // optional Anthropic Admin API key for real billed usage
 };
 
 const AI_CACHE_PATH = path.join(app.getPath('userData'), 'ai-summaries.json');
@@ -268,24 +269,46 @@ function tick() {
 
 // ---------- config ----------
 
-function loadConfig() {
+// Secrets (API keys) are encrypted at rest with the OS keychain via safeStorage.
+function decryptSecret(enc) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    // Migration: a config file already exists → this is a returning user.
-    // Don't re-onboard them just because the `onboarded` flag was added later.
-    if (!('onboarded' in parsed)) parsed.onboarded = true;
-    return {
-      ...DEFAULTS,
-      ...parsed,
-      launch: { ...DEFAULTS.launch, ...(parsed.launch || {}) },
-    };
+    if (!enc || !safeStorage.isEncryptionAvailable()) return '';
+    return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+  } catch { return ''; }
+}
+function encryptSecret(plain) {
+  try {
+    if (!plain || !safeStorage.isEncryptionAvailable()) return '';
+    return safeStorage.encryptString(plain).toString('base64');
+  } catch { return ''; }
+}
+
+function loadConfig() {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   } catch {
     return { ...DEFAULTS }; // no config file → genuine first run → onboarded:false
   }
+  // Migration: a config file already exists → this is a returning user.
+  if (!('onboarded' in parsed)) parsed.onboarded = true;
+  const cfg = { ...DEFAULTS, ...parsed, launch: { ...DEFAULTS.launch, ...(parsed.launch || {}) } };
+  // Decrypt secrets held at rest (fall back to any legacy plaintext value).
+  if (cfg.apiKeyEnc) cfg.apiKey = decryptSecret(cfg.apiKeyEnc) || cfg.apiKey || '';
+  if (cfg.adminKeyEnc) cfg.adminKey = decryptSecret(cfg.adminKeyEnc) || cfg.adminKey || '';
+  return cfg;
 }
 
 function saveConfig(cfg) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  const out = { ...cfg };
+  // Encrypt secrets at rest; don't persist them in plaintext when encryption works.
+  if (safeStorage.isEncryptionAvailable()) {
+    out.apiKeyEnc = out.apiKey ? encryptSecret(out.apiKey) : '';
+    out.adminKeyEnc = out.adminKey ? encryptSecret(out.adminKey) : '';
+    delete out.apiKey;
+    delete out.adminKey;
+  }
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(out, null, 2));
 }
 
 // ---------- window ----------
@@ -758,7 +781,17 @@ function openClaudeIn(projectPath, overrides) {
 
 ipcMain.handle('app-version', () => app.getVersion());
 
-ipcMain.handle('get-config', () => loadConfig());
+ipcMain.handle('get-config', () => {
+  const cfg = loadConfig();
+  const safe = { ...cfg };
+  safe.hasApiKey = !!cfg.apiKey;
+  safe.hasAdminKey = !!cfg.adminKey;
+  safe.encryptionAvailable = safeStorage.isEncryptionAvailable();
+  // never expose secrets (or their ciphertext) to the renderer
+  delete safe.apiKey; delete safe.apiKeyEnc;
+  delete safe.adminKey; delete safe.adminKeyEnc;
+  return safe;
+});
 
 ipcMain.handle('set-root', (_e, root) => {
   const cfg = loadConfig();
@@ -928,6 +961,14 @@ ipcMain.handle('project-detail', (_e, projectPath) => {
     sessions: m ? m.sessions : {},
     series: indexer.dailySeries(projectPath, 30),
   };
+});
+
+ipcMain.handle('active-session', () => {
+  try { return indexer.activeSession(); } catch { return null; }
+});
+
+ipcMain.handle('insights', () => {
+  try { return indexer.insights(); } catch { return null; }
 });
 
 ipcMain.handle('overview-metrics', (_e, days) => {
@@ -1406,7 +1447,37 @@ ipcMain.handle('set-api-key', (_e, key) => {
   cfg.apiKey = String(key || '').trim();
   if (!cfg.apiKey) cfg.aiSummaries = false;
   saveConfig(cfg);
-  return { apiKey: cfg.apiKey, aiSummaries: cfg.aiSummaries };
+  return { hasApiKey: !!cfg.apiKey, aiSummaries: cfg.aiSummaries };
+});
+ipcMain.handle('set-admin-key', (_e, key) => {
+  const cfg = loadConfig();
+  cfg.adminKey = String(key || '').trim();
+  saveConfig(cfg);
+  return { hasAdminKey: !!cfg.adminKey };
+});
+ipcMain.handle('admin-billing', async () => {
+  const cfg = loadConfig();
+  if (!cfg.adminKey) return { hasKey: false };
+  try {
+    const start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
+    const since = start.toISOString();
+    const url = `https://api.anthropic.com/v1/organizations/cost_report?starting_at=${encodeURIComponent(since)}`;
+    const resp = await fetch(url, { headers: { 'x-api-key': cfg.adminKey, 'anthropic-version': '2023-06-01' } });
+    if (!resp.ok) {
+      return { hasKey: true, error: resp.status === 401 ? 'Key rejected (needs an org Admin key).' : `Anthropic API error ${resp.status}.` };
+    }
+    const json = await resp.json();
+    let total = 0;
+    for (const bucket of (Array.isArray(json.data) ? json.data : [])) {
+      for (const r of (Array.isArray(bucket.results) ? bucket.results : [])) {
+        const amt = parseFloat(r.amount != null ? r.amount : (r.cost != null ? r.cost : 0));
+        if (!isNaN(amt)) total += amt;
+      }
+    }
+    return { hasKey: true, amount: total, currency: 'USD', since };
+  } catch (err) {
+    return { hasKey: true, error: err.message };
+  }
 });
 
 ipcMain.handle('set-ai-summaries', (_e, on) => {

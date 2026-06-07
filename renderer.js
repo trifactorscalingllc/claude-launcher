@@ -308,7 +308,7 @@ async function loadSummary(el, p) {
     node.classList.add('hidden');
   }
   // Upgrade to an AI summary if enabled (cached server-side; safe to call).
-  if (cfg.apiKey && cfg.aiSummaries) {
+  if (cfg.hasApiKey && cfg.aiSummaries) {
     const r = await window.launcher.aiSummary(p.path, p.name);
     if (el.isConnected && r && r.summary) {
       node.textContent = r.summary;
@@ -470,9 +470,10 @@ function syncSettingsUI() {
   $('optModel').value = cfg.launch.model || 'default';
   $('optContinue').checked = !!cfg.launch.continue;
   $('optSkip').checked = !!cfg.launch.skipPermissions;
-  $('optApiKey').value = cfg.apiKey ? '••••••••••••••••' : '';
+  $('optApiKey').value = cfg.hasApiKey ? '••••••••••••••••' : '';
   $('optAiSummaries').checked = !!cfg.aiSummaries;
-  $('optAiSummaries').disabled = !cfg.apiKey;
+  $('optAiSummaries').disabled = !cfg.hasApiKey;
+  if ($('optAdminKey')) $('optAdminKey').value = cfg.hasAdminKey ? '••••••••••••••••' : '';
   $('optAutoTrust').checked = !!cfg.autoTrust;
   $('optTerminal').value = cfg.terminalCommand || '';
   $('optBudgetWeekly').value = cfg.budgetWeekly || '';
@@ -490,7 +491,7 @@ function syncSettingsUI() {
 
 function updateApiHint() {
   const h = $('apiKeyHint');
-  if (!cfg.apiKey) h.textContent = 'No key set — using offline summaries.';
+  if (!cfg.hasApiKey) h.textContent = 'No key set — using offline summaries.';
   else if (cfg.aiSummaries) h.textContent = 'AI summaries on. Cards generate once, then read from cache.';
   else h.textContent = 'Key saved. Turn on the toggle to enable AI summaries.';
 }
@@ -864,7 +865,7 @@ async function openDetail(p) {
     window.launcher.projectSummary(p.path),
   ]);
   let summaryText = sum.desc || sum.lastTitle || '';
-  if (cfg.apiKey && cfg.aiSummaries) {
+  if (cfg.hasApiKey && cfg.aiSummaries) {
     const r = await window.launcher.aiSummary(p.path, p.name);
     if (r && r.summary) summaryText = r.summary;
   }
@@ -1038,15 +1039,51 @@ function modelMixBars(ms) {
   </div>`).join('');
 }
 
+const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function hourLabel(h) { const ap = h < 12 ? 'am' : 'pm'; let hh = h % 12; if (hh === 0) hh = 12; return `${hh}${ap}`; }
+function deltaBadge(pct, lastVal) {
+  if (!lastVal) return '<span class="delta new">new</span>';
+  const up = pct >= 0;
+  return `<span class="delta ${up ? 'up' : 'down'}">${up ? '▲' : '▼'}${Math.abs(pct)}% vs last wk</span>`;
+}
+function insightsBlock(ins) {
+  if (!ins) return '';
+  const w = ins.wow || {};
+  const eff = `
+    <div class="panel">
+      <div class="panel-title">Efficiency <span class="panel-hint">all-time</span></div>
+      <div class="kv"><span>Cache hit rate</span><span title="Share of input tokens served from prompt cache — higher is cheaper."><strong>${Math.round((ins.cacheHit || 0) * 100)}%</strong></span></div>
+      <div class="kv"><span>Cost / turn</span><span title="${COST_TIP}">${fmtCost(ins.costPerTurn)} <span class="est">est.</span></span></div>
+      <div class="kv"><span>Tokens / turn</span><span>${fmtNum(Math.round(ins.tokensPerTurn || 0))}</span></div>
+      ${ins.anyHourly ? `<div class="kv"><span>Busiest</span><span>${DOW[ins.busiestDow]} · ${hourLabel(ins.busiestHour)}</span></div>` : ''}
+    </div>`;
+  const trends = `
+    <div class="panel">
+      <div class="panel-title">Trends <span class="panel-hint">this week vs last</span></div>
+      <div class="kv"><span>Spend this week</span><span title="${COST_TIP}">${fmtCost(w.thisCost || 0)} <span class="est">est.</span> ${deltaBadge(w.costPct, w.lastCost)}</span></div>
+      <div class="kv"><span>Time this week</span><span>${fmtDuration(w.thisMs || 0)} ${deltaBadge(w.msPct, w.lastMs)}</span></div>
+    </div>`;
+  const top = (ins.topByCost && ins.topByCost.length) ? `
+    <div class="panel">
+      <div class="panel-title">Top sessions <span class="panel-hint">most expensive · all-time</span></div>
+      ${ins.topByCost.map((s) => `<div class="kv lead-row" data-path="${escapeHtml(s.path)}" data-session="${escapeHtml(s.sessionId)}">
+          <span class="lead-name">${escapeHtml(s.title || s.name)} <span class="s-open">read ›</span></span>
+          <span class="muted" title="${COST_TIP}">${fmtCost(s.cost)} · ${fmtDuration(s.activeMs)}</span>
+        </div>`).join('')}
+    </div>` : '';
+  return `<div class="detail-grid">${eff}${trends}</div>${top}`;
+}
+
 async function loadOverview(days) {
   overviewDays = days || overviewDays || 7;
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
 
-  const [res, bs, ms] = await Promise.all([
+  const [res, bs, ms, ins] = await Promise.all([
     window.launcher.overviewMetrics(overviewDays),
     window.launcher.budgetStatus(),
     window.launcher.modelSpend(),
+    window.launcher.insights(),
   ]);
   const r = res.range;
   const body = $('overview-body');
@@ -1062,6 +1099,10 @@ async function loadOverview(days) {
       <div class="kpi"><div class="kpi-val">${fmtNum(t.projects)}</div><div class="kpi-lbl">Projects active</div></div>
     </div>
     <p class="cost-note">${svg('coin', 12)} Cost is an estimate — recorded tokens × Anthropic's public API prices. Not a bill if you're on a Pro/Max subscription.</p>
+    ${cfg.hasAdminKey ? `<div class="panel" id="billing-panel">
+      <div class="panel-title">Real billed usage <span class="panel-hint">month to date · from Anthropic</span></div>
+      <div id="billing-body"><p class="panel-sub">Fetching billed usage…</p></div>
+    </div>` : ''}
     <div class="panel recap-panel">
       <div class="panel-title">Today's recap
         <button class="btn ghost btn-xs recap-refresh" title="Regenerate today's recap">${svg('repeat', 14)}</button>
@@ -1097,6 +1138,7 @@ async function loadOverview(days) {
         </tbody>
       </table>` : '<p class="panel-sub">No project activity in this range.</p>'}
     </div>
+    ${insightsBlock(ins)}
     <div class="panel">
       <div class="panel-title">Activity — last 30 days</div>
       ${heatmap(res.heatDays)}
@@ -1108,10 +1150,26 @@ async function loadOverview(days) {
       if (p) openDetail({ name: p.name, path: p.path, external: true });
     });
   });
+  body.querySelectorAll('.lead-row[data-session]').forEach((row) => {
+    row.addEventListener('click', () => openTranscript({ cwd: row.dataset.path, sessionId: row.dataset.session }, 'overview'));
+  });
 
   const rr = body.querySelector('.recap-refresh');
   if (rr) rr.addEventListener('click', () => loadRecap(true));
   loadRecap(false);
+  if (cfg.hasAdminKey) loadBilling();
+}
+
+async function loadBilling() {
+  const el = document.getElementById('billing-body');
+  if (!el) return;
+  const r = await window.launcher.adminBilling();
+  const node = document.getElementById('billing-body');
+  if (!node) return;
+  if (!r || !r.hasKey) { node.innerHTML = '<p class="panel-sub">Add an Admin API key in Settings to see real billed usage.</p>'; return; }
+  if (r.error) { node.innerHTML = `<p class="panel-sub">Couldn't fetch billed usage: ${escapeHtml(r.error)}</p>`; return; }
+  node.innerHTML = `<div class="billing-amt">${fmtCost(r.amount || 0)}</div>
+    <p class="panel-sub">Actual billed cost so far this month (USD), pulled from Anthropic's Cost API — not an estimate.</p>`;
 }
 
 async function loadRecap(force) {
@@ -1142,6 +1200,72 @@ async function loadRecap(force) {
 }
 
 // ---------- modal ----------
+// ---------- command palette (⌘K) ----------
+let paletteItems = [];
+let paletteIdx = 0;
+
+function buildPaletteCommands() {
+  const cmds = [];
+  [['projects', 'Projects', 'grid'], ['overview', 'Overview', 'chart'], ['search', 'Search', 'search'],
+   ['context', 'Context', 'brain'], ['routines', 'Routines', 'repeat'], ['settings', 'Settings', 'gear']]
+    .forEach(([v, label, icon]) => cmds.push({ icon, label, hint: 'Tab', run: () => switchView(v) }));
+  cmds.push({ icon: 'plus', label: 'New project', hint: 'Action', run: () => { switchView('projects'); openModal(); } });
+  cmds.push({ icon: 'moon', label: 'Toggle dark mode', hint: 'Action', run: async () => { const next = (cfg.theme === 'dark') ? 'light' : 'dark'; cfg.theme = await window.launcher.setTheme(next); applyTheme(cfg.theme); } });
+  [...projects, ...externalProjects].forEach((p) => {
+    cmds.push({ icon: p.external ? 'layers' : 'folder', label: p.name, sub: p.path, hint: 'Open in Claude',
+      run: async () => { const r = await window.launcher.openProject(p.path); handleLaunchResult(r, p.name); } });
+  });
+  return cmds;
+}
+
+function openPalette() {
+  const ov = $('paletteOverlay');
+  ov.classList.remove('hidden');
+  const inp = $('paletteInput');
+  inp.value = '';
+  renderPalette('');
+  setTimeout(() => inp.focus(), 20);
+}
+function closePalette() { $('paletteOverlay').classList.add('hidden'); }
+function paletteOpen() { return !$('paletteOverlay').classList.contains('hidden'); }
+
+function renderPalette(q) {
+  const query = q.trim().toLowerCase();
+  let items = query
+    ? buildPaletteCommands().filter((c) => (c.label + ' ' + (c.sub || '')).toLowerCase().includes(query))
+    : buildPaletteCommands();
+  if (query.length >= 2) {
+    items = [{ icon: 'search', label: `Search history for "${q.trim()}"`, hint: 'Search',
+      run: () => { switchView('search'); const si = $('searchInput'); if (si) { si.value = q.trim(); runSearch(q.trim()); } } }, ...items];
+  }
+  paletteItems = items.slice(0, 60);
+  paletteIdx = 0;
+  drawPaletteList();
+}
+
+function drawPaletteList() {
+  const list = $('paletteList');
+  if (!paletteItems.length) { list.innerHTML = '<div class="palette-empty">No matches.</div>'; return; }
+  list.innerHTML = paletteItems.map((c, i) => `<div class="palette-item ${i === paletteIdx ? 'sel' : ''}" data-i="${i}">
+      <span class="palette-i-ico">${svg(c.icon || 'chev', 16)}</span>
+      <span class="palette-i-label">${escapeHtml(c.label)}${c.sub ? `<span class="palette-i-sub">${escapeHtml(c.sub)}</span>` : ''}</span>
+      <span class="palette-i-hint">${escapeHtml(c.hint || '')}</span>
+    </div>`).join('');
+  list.querySelectorAll('.palette-item').forEach((el) => {
+    el.addEventListener('click', () => runPaletteItem(Number(el.dataset.i)));
+    el.addEventListener('mousemove', () => { if (paletteIdx !== Number(el.dataset.i)) { paletteIdx = Number(el.dataset.i); highlightPalette(); } });
+  });
+  highlightPalette();
+}
+function highlightPalette() {
+  const list = $('paletteList');
+  list.querySelectorAll('.palette-item').forEach((el, i) => el.classList.toggle('sel', i === paletteIdx));
+  const sel = list.querySelector('.palette-item.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+function movePalette(d) { if (!paletteItems.length) return; paletteIdx = (paletteIdx + d + paletteItems.length) % paletteItems.length; highlightPalette(); }
+function runPaletteItem(i) { const c = paletteItems[i]; if (!c) return; closePalette(); try { c.run(); } catch {} }
+
 function openModal() { $('modal').classList.remove('hidden'); $('newName').value = ''; $('newName').focus(); }
 function closeModal() { $('modal').classList.add('hidden'); }
 async function doCreate() {
@@ -1246,7 +1370,21 @@ async function init() {
       applyRedact(cfg.redact);
       showStatus(cfg.redact ? 'Descriptions blurred (for screenshots).' : 'Blur off.', 'ok');
     }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      paletteOpen() ? closePalette() : openPalette();
+    }
   });
+
+  // command palette interactions
+  $('paletteInput').addEventListener('input', (e) => renderPalette(e.target.value));
+  $('paletteInput').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); movePalette(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); movePalette(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(paletteIdx); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+  });
+  $('paletteOverlay').addEventListener('click', (e) => { if (e.target === $('paletteOverlay')) closePalette(); });
 
   // indexing indicator (only show if it takes a moment)
   let indexed = false;
@@ -1338,9 +1476,17 @@ async function init() {
     const val = e.target.value;
     if (val.includes('•')) return; // unchanged masked value
     const r = await window.launcher.setApiKey(val);
-    cfg.apiKey = r.apiKey; cfg.aiSummaries = r.aiSummaries;
+    cfg.hasApiKey = r.hasApiKey; cfg.aiSummaries = r.aiSummaries;
     syncSettingsUI();
-    showStatus(r.apiKey ? 'API key saved.' : 'API key cleared.', 'ok');
+    showStatus(r.hasApiKey ? 'API key saved (encrypted).' : 'API key cleared.', 'ok');
+  });
+  if ($('optAdminKey')) $('optAdminKey').addEventListener('change', async (e) => {
+    const val = e.target.value;
+    if (val.includes('•')) return;
+    const r = await window.launcher.setAdminKey(val);
+    cfg.hasAdminKey = r.hasAdminKey;
+    showStatus(r.hasAdminKey ? 'Admin key saved (encrypted).' : 'Admin key cleared.', 'ok');
+    if (!$('view-overview').classList.contains('hidden')) loadOverview(overviewDays);
   });
   $('optAiSummaries').addEventListener('change', async (e) => {
     cfg.aiSummaries = await window.launcher.setAiSummaries(e.target.checked);
@@ -1375,8 +1521,67 @@ async function init() {
   window.launcher.onFsChanged(() => {
     clearIndex();
     loadProjects();
+    refreshActivePanel();
     if (!$('view-overview').classList.contains('hidden')) loadOverview(overviewDays);
   });
+
+  refreshActivePanel();
+  setInterval(refreshActivePanel, 15000); // catch the session going idle
+}
+
+// ---------- live "Active now" panel ----------
+let activeData = null;
+let activeTimer = null;
+
+function modelShort(m) {
+  if (!m) return '';
+  if (m.includes('opus')) return 'Opus';
+  if (m.includes('sonnet')) return 'Sonnet';
+  if (m.includes('haiku')) return 'Haiku';
+  return m;
+}
+function fmtClock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+async function refreshActivePanel() {
+  const panel = $('activePanel');
+  if (!panel) return;
+  const a = await window.launcher.activeSession();
+  activeData = a;
+  if (!a) {
+    panel.classList.add('hidden'); panel.innerHTML = '';
+    if (activeTimer) { clearInterval(activeTimer); activeTimer = null; }
+    return;
+  }
+  panel.classList.remove('hidden');
+  drawActivePanel();
+  if (!activeTimer) activeTimer = setInterval(tickActivePanel, 1000);
+}
+function drawActivePanel() {
+  const a = activeData;
+  if (!a) return;
+  const first = a.firstTs || a.lastTs;
+  $('activePanel').innerHTML = `
+    <div class="ap-head"><span class="ap-dot"></span> ACTIVE NOW${a.model ? `<span class="ap-model">${escapeHtml(modelShort(a.model))}</span>` : ''}</div>
+    <div class="ap-name">${escapeHtml(a.name)}</div>
+    <div class="ap-stats">
+      <span class="ap-clock" data-first="${first}" title="How long this session has been running">${fmtClock(Date.now() - first)}</span>
+      <span>${fmtNum(a.tokens)} tokens</span>
+      <span title="${COST_TIP}">${fmtCost(a.cost)} <span class="est">est.</span></span>
+    </div>
+    <div class="ap-actions">
+      <button class="btn primary ap-open">${svg('terminal', 15)} Open</button>
+      <button class="btn ghost ap-view">${svg('message', 15)} View session</button>
+    </div>`;
+  $('activePanel').querySelector('.ap-open').addEventListener('click', async () => { const r = await window.launcher.openProject(a.path); handleLaunchResult(r, a.name); });
+  $('activePanel').querySelector('.ap-view').addEventListener('click', () => openTranscript({ cwd: a.path, sessionId: a.sessionId }, 'projects'));
+}
+function tickActivePanel() {
+  const clk = document.querySelector('#activePanel .ap-clock');
+  if (!clk) return;
+  clk.textContent = fmtClock(Date.now() - Number(clk.dataset.first));
 }
 
 init();

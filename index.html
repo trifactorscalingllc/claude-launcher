@@ -74,6 +74,8 @@
           <div id="indexBanner" class="banner hidden">Indexing your Claude history…</div>
           <div id="status" class="banner hidden"></div>
 
+          <div id="activePanel" class="active-panel hidden"></div>
+
           <div id="pinnedWrap" class="hidden">
             <div class="section-head"><span class="ico" data-ico="star"></span> Pinned</div>
             <div id="pinnedGrid" class="grid"></div>
@@ -167,7 +169,7 @@
 
           <div class="panel">
             <div class="panel-title">AI project summaries</div>
-            <p class="panel-sub">Generate a one-line "what this is + where it stands" per project with Claude (<code>claude-opus-4-8</code>). Summaries are cached and only regenerate when the project changes. Your key is stored locally in this app's config.</p>
+            <p class="panel-sub">Generate a one-line "what this is + where it stands" per project with Claude (<code>claude-opus-4-8</code>). Summaries are cached and only regenerate when the project changes. Your key is <strong>encrypted with your OS keychain</strong> — never stored in plaintext.</p>
 
             <label class="field">
               <span>Anthropic API key</span>
@@ -183,6 +185,15 @@
               </span>
             </label>
             <div id="apiKeyHint" class="panel-sub" style="margin:6px 0 0"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Real billed usage <span class="panel-hint">optional</span></div>
+            <p class="panel-sub">Card and overview costs are <em>estimates</em>. If your org has an <strong>Admin</strong> API key (<code>sk-ant-admin…</code>), add it to pull your <strong>actual billed</strong> month-to-date cost from Anthropic's Cost API into the Overview. Encrypted with your OS keychain. (Pro/Max subscriptions have no per-user billing API — leave this blank.)</p>
+            <label class="field">
+              <span>Anthropic Admin API key</span>
+              <input id="optAdminKey" type="password" placeholder="sk-ant-admin-…" autocomplete="off" spellcheck="false" />
+            </label>
           </div>
 
           <div class="panel">
@@ -349,6 +360,18 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Command palette (⌘K) -->
+  <div id="paletteOverlay" class="palette-overlay hidden">
+    <div class="palette">
+      <div class="palette-input-row">
+        <span class="palette-ico"></span>
+        <input id="paletteInput" type="text" placeholder="Jump to a project, search, or open a tab…" autocomplete="off" spellcheck="false" />
+        <kbd class="palette-esc">esc</kbd>
+      </div>
+      <div id="paletteList" class="palette-list"></div>
+    </div>
   </div>
 
   <!-- Auto-update toast -->
