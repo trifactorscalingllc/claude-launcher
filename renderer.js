@@ -361,7 +361,25 @@ function render() {
   if (rootError) {
     empty.classList.remove('hidden'); // keep the actionable folder message set by loadProjects
   } else if (!list.length) {
-    empty.textContent = filter ? `No projects match "${filter}".` : 'No project folders found here yet. Click "New project" to create one.';
+    if (filter) {
+      empty.textContent = `No projects match "${filter}".`;
+    } else {
+      const hasOther = externalProjects.length > 0;
+      empty.innerHTML = `<div class="welcome">
+          <div class="welcome-mark">${svg('sun', 30)}</div>
+          <h3>Welcome to Claude Helm</h3>
+          <p>This is your projects folder — every subfolder here shows up as a card you can open in Claude Code with one click.<br><code>${escapeHtml(cfg.root)}</code></p>
+          <div class="welcome-actions">
+            <button class="btn primary" id="emptyNew">${svg('plus', 14)} New project</button>
+            <button class="btn ghost" id="emptyPick">Choose a different folder</button>
+          </div>
+          ${hasOther ? `<p class="welcome-hint">${svg('layers', 13)} Found ${externalProjects.length} project${externalProjects.length === 1 ? '' : 's'} from your existing Claude history below.</p>` : `<p class="welcome-hint">No Claude history yet — open a project and your time, cost, and activity will start showing up here.</p>`}
+        </div>`;
+      const n = document.getElementById('emptyNew');
+      if (n) n.addEventListener('click', openModal);
+      const pk = document.getElementById('emptyPick');
+      if (pk) pk.addEventListener('click', async () => { const c = await window.launcher.pickRoot(); if (c) { cfg = c; $('footRoot').textContent = cfg.root; await loadProjects(); } });
+    }
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');
@@ -1232,12 +1250,23 @@ async function init() {
   const toast = $('updateToast');
   const umsg = $('updateMsg');
   const uinstall = $('updateInstall');
+  const ustate = $('updateState');      // Settings → About panel
   uinstall.addEventListener('click', () => window.launcher.installUpdate());
+  window.launcher.appVersion().then((v) => { $('aboutVer').textContent = 'Claude Helm v' + v; });
+  $('repoLink').addEventListener('click', (e) => { e.preventDefault(); window.launcher.openExternal('https://github.com/trifactorscalingllc/claude-helm'); });
+  let checkedManually = false;
+  $('checkUpdate').addEventListener('click', () => {
+    checkedManually = true;
+    if (ustate) ustate.textContent = 'Checking for updates…';
+    window.launcher.checkUpdate();
+  });
   window.launcher.onUpdateStatus(({ state, info }) => {
-    if (state === 'available') { umsg.textContent = `Downloading update v${info.version}…`; toast.classList.remove('hidden'); uinstall.classList.add('hidden'); }
-    else if (state === 'downloading') { umsg.textContent = `Downloading update… ${info.percent}%`; toast.classList.remove('hidden'); }
-    else if (state === 'ready') { umsg.textContent = `Update v${info.version} ready.`; toast.classList.remove('hidden'); uinstall.classList.remove('hidden'); }
-    else if (state === 'error') { toast.classList.add('hidden'); }
+    if (state === 'checking') { if (checkedManually && ustate) ustate.textContent = 'Checking for updates…'; }
+    else if (state === 'available') { umsg.textContent = `Downloading update v${info.version}…`; toast.classList.remove('hidden'); uinstall.classList.add('hidden'); if (ustate) ustate.textContent = `Update v${info.version} found — downloading…`; }
+    else if (state === 'downloading') { umsg.textContent = `Downloading update… ${info.percent}%`; toast.classList.remove('hidden'); if (ustate) ustate.textContent = `Downloading update… ${info.percent}%`; }
+    else if (state === 'ready') { umsg.textContent = `Update v${info.version} ready.`; toast.classList.remove('hidden'); uinstall.classList.remove('hidden'); if (ustate) ustate.textContent = `Update v${info.version} ready — restart to apply.`; }
+    else if (state === 'current') { if (checkedManually && ustate) ustate.textContent = "You're on the latest version."; checkedManually = false; }
+    else if (state === 'error') { toast.classList.add('hidden'); if (checkedManually && ustate) ustate.textContent = "Couldn't check right now — try again shortly."; checkedManually = false; }
   });
 
   // live auto-refresh when projects or Claude session data change

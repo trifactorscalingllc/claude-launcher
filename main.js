@@ -339,7 +339,13 @@ ipcMain.handle('install-update', () => {
     setImmediate(() => autoUpdater.quitAndInstall(true, true)); // isSilent=true → NSIS /S, force-closes; isForceRunAfter=true
   } catch {}
 });
-ipcMain.handle('check-update', () => { if (app.isPackaged) autoUpdater.checkForUpdates().catch(() => {}); });
+ipcMain.handle('check-update', () => {
+  if (app.isPackaged) autoUpdater.checkForUpdates().catch(() => {});
+  else sendUpdate('current'); // dev build has no feed — report "latest"
+});
+ipcMain.handle('open-external', (_e, url) => {
+  if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
+});
 
 app.whenReady().then(() => {
   createWindow();

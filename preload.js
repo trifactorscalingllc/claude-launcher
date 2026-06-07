@@ -63,4 +63,5 @@ contextBridge.exposeInMainWorld('launcher', {
   },
   installUpdate: () => ipcRenderer.invoke('install-update'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 });
