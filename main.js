@@ -334,6 +334,21 @@ function setupAutoUpdate() {
 ipcMain.handle('install-update', () => {
   try {
     app.isQuitting = true;
+    // Safeguard for UNSIGNED Windows builds: the NSIS installer can hit
+    // "failed to uninstall old application files" (exit 2) when Defender locks
+    // the old exe — the upgrade still applies, but NSIS skips its own relaunch,
+    // leaving the app closed. Spawn a detached watcher that reopens the app a
+    // few seconds after the installer settles (two attempts, fast + slow disks).
+    // The single-instance lock makes a redundant launch harmless — it just
+    // focuses the window NSIS may have already reopened.
+    if (process.platform === 'win32') {
+      try {
+        const exe = process.execPath; // same path after the in-place upgrade
+        const relaunch = `ping -n 8 127.0.0.1 >nul & start "" "${exe}" & ping -n 14 127.0.0.1 >nul & start "" "${exe}"`;
+        spawn(process.env.ComSpec || 'cmd.exe', ['/c', relaunch],
+          { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+      } catch {}
+    }
     // close windows first so no renderer holds files, then silent install + relaunch
     BrowserWindow.getAllWindows().forEach((w) => { try { w.removeAllListeners('close'); w.close(); } catch {} });
     setImmediate(() => autoUpdater.quitAndInstall(true, true)); // isSilent=true → NSIS /S, force-closes; isForceRunAfter=true
