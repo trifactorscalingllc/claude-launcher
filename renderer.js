@@ -219,7 +219,7 @@ function makeCard(p) {
         <div class="card-name" title="${p.path}">${p.name} <span class="active-dot hidden" data-slot="active-dot" title="Active in Claude now">●</span></div>
         <div class="card-tags">
           ${p.tag ? `<span class="tag tagchip">${svg('tag', 12)} ${escapeHtml(p.tag)}</span>` : ''}
-          ${p.isGit ? `<span class="tag git">${svg('terminal', 13)} git</span>` : ''}
+          ${p.isGit && !p.external ? `<span class="tag git" data-slot="git">${svg('branch', 12)} <span class="sl">git…</span></span>` : (p.isGit ? `<span class="tag git">${svg('branch', 12)} git</span>` : '')}
           <span class="tag">${svg('clock', 13)} ${relTime(p.mtime)}</span>
           ${p.external ? `<span class="tag ext" title="${p.path}">${svg('layers', 13)} outside folder</span>` : ''}
         </div>
@@ -273,7 +273,23 @@ function makeCard(p) {
   }
   loadMetrics(el, p);
   loadSummary(el, p);
+  if (p.isGit && !p.external) loadGit(el, p);
   return el;
+}
+
+async function loadGit(el, p) {
+  const g = await window.launcher.gitStatus(p.path);
+  if (!el.isConnected) return;
+  const node = el.querySelector('[data-slot="git"]');
+  if (!node) return;
+  if (!g || !g.isRepo) { node.remove(); return; }
+  let extra = '';
+  if (g.dirty > 0) extra += ` <span class="git-dirty" title="${g.dirty} uncommitted change${g.dirty === 1 ? '' : 's'}">●${g.dirty}</span>`;
+  if (g.ahead) extra += ` <span class="git-sync" title="${g.ahead} commit(s) ahead of upstream">↑${g.ahead}</span>`;
+  if (g.behind) extra += ` <span class="git-sync" title="${g.behind} commit(s) behind upstream">↓${g.behind}</span>`;
+  node.className = 'tag git' + (g.dirty > 0 ? ' dirty' : ' clean');
+  node.innerHTML = `${svg('branch', 12)} <span class="git-branch">${escapeHtml(g.branch || 'git')}</span>${extra}`;
+  if (g.commit) node.title = `${g.commit.hash} · ${g.commit.rel}\n${g.commit.subject}`;
 }
 
 async function loadSummary(el, p) {
@@ -460,6 +476,9 @@ function syncSettingsUI() {
   $('optBudgetMonthly').value = cfg.budgetMonthly || '';
   $('optNotifications').checked = cfg.notifications !== false;
   $('optRedact').checked = !!cfg.redact;
+  $('optOpenAtLogin').checked = !!cfg.openAtLogin;
+  $('optStartHidden').checked = !!cfg.startHidden;
+  $('optStartHidden').disabled = !cfg.openAtLogin;
   const osNames = { win32: 'Windows Terminal', darwin: 'macOS Terminal/iTerm', linux: 'Linux terminal' };
   $('osName').textContent = osNames[window.launcher.platform] || window.launcher.platform;
   updateApiHint();
@@ -1039,6 +1058,12 @@ async function loadOverview(days) {
       <div class="kpi"><div class="kpi-val">${fmtNum(t.sessions)}</div><div class="kpi-lbl">Sessions</div></div>
       <div class="kpi"><div class="kpi-val">${fmtNum(t.projects)}</div><div class="kpi-lbl">Projects active</div></div>
     </div>
+    <div class="panel recap-panel">
+      <div class="panel-title">Today's recap
+        <button class="btn ghost btn-xs recap-refresh" title="Regenerate today's recap">${svg('repeat', 14)}</button>
+      </div>
+      <div id="recap-body"><p class="panel-sub">Loading today's activity…</p></div>
+    </div>
     <div class="detail-grid">
       <div class="panel">
         <div class="panel-title">Budget &amp; forecast</div>
@@ -1079,6 +1104,37 @@ async function loadOverview(days) {
       if (p) openDetail({ name: p.name, path: p.path, external: true });
     });
   });
+
+  const rr = body.querySelector('.recap-refresh');
+  if (rr) rr.addEventListener('click', () => loadRecap(true));
+  loadRecap(false);
+}
+
+async function loadRecap(force) {
+  const bodyEl = document.getElementById('recap-body');
+  if (!bodyEl) return;
+  if (force) bodyEl.innerHTML = '<p class="panel-sub">Generating recap…</p>';
+  const r = await window.launcher.dailyRecap({ force: !!force });
+  const node = document.getElementById('recap-body');
+  if (!node) return; // navigated away
+  if (r.empty) {
+    node.innerHTML = "<p class=\"panel-sub\">No Claude activity logged yet today. Open a project and it'll show up here.</p>";
+    return;
+  }
+  const sentence = `${fmtDuration(r.totalMs)} · ${fmtCost(r.totalCost)} · ${r.projects.length} project${r.projects.length === 1 ? '' : 's'}`;
+  let html = `<div class="recap-stat">${sentence}</div>`;
+  if (r.narrative) {
+    const bullets = r.narrative.split('\n').map((l) => l.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+    html += `<ul class="recap-list">${bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
+  } else {
+    html += `<ul class="recap-list">${r.projects.map((p) => {
+      const title = p.titles && p.titles.length ? ' — ' + escapeHtml(p.titles[0]) : '';
+      return `<li><strong>${escapeHtml(p.name)}</strong> · ${fmtDuration(p.activeMs)} · ${fmtCost(p.cost)}${title}</li>`;
+    }).join('')}</ul>`;
+    if (!r.hasKey) html += '<p class="panel-sub recap-hint">Add an Anthropic API key in Settings for an AI-written narrative recap.</p>';
+  }
+  if (r.aiError) html += `<p class="panel-sub recap-hint">AI recap unavailable right now (${escapeHtml(r.aiError)}). Showing the factual summary.</p>`;
+  node.innerHTML = html;
 }
 
 // ---------- modal ----------
@@ -1259,6 +1315,16 @@ async function init() {
   $('optBudgetMonthly').addEventListener('change', async (e) => { const r = await window.launcher.setBudget({ monthly: e.target.value }); cfg.budgetMonthly = r.budgetMonthly; showStatus('Monthly budget saved.', 'ok'); });
   $('optNotifications').addEventListener('change', async (e) => { cfg.notifications = await window.launcher.setNotifications(e.target.checked); });
   $('optRedact').addEventListener('change', async (e) => { cfg.redact = await window.launcher.setRedact(e.target.checked); applyRedact(cfg.redact); });
+  $('optOpenAtLogin').addEventListener('change', async (e) => {
+    const r = await window.launcher.setLoginItem({ openAtLogin: e.target.checked });
+    cfg.openAtLogin = r.openAtLogin; cfg.startHidden = r.startHidden;
+    $('optStartHidden').disabled = !cfg.openAtLogin;
+    showStatus(cfg.openAtLogin ? 'Claude Helm will launch at login.' : 'Launch at login turned off.', 'ok');
+  });
+  $('optStartHidden').addEventListener('change', async (e) => {
+    const r = await window.launcher.setLoginItem({ startHidden: e.target.checked });
+    cfg.startHidden = r.startHidden;
+  });
 
   $('tagFilter').addEventListener('change', (e) => { tagFilter = e.target.value; render(); });
   $('archToggle').addEventListener('click', () => { showArchived = !showArchived; $('archToggle').classList.toggle('active', showArchived); render(); });

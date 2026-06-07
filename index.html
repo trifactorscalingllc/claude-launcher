@@ -216,6 +216,27 @@
           </div>
 
           <div class="panel">
+            <div class="panel-title">Startup</div>
+            <p class="panel-sub">Keep Claude Helm running in the background so it always has fresh stats and tray alerts.</p>
+            <label class="toggle">
+              <input type="checkbox" id="optOpenAtLogin" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Launch at login</strong>
+                <em>Open Claude Helm automatically when you sign in to your computer.</em>
+              </span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="optStartHidden" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Start minimized to tray</strong>
+                <em>When launched at login, start in the system tray instead of opening the window.</em>
+              </span>
+            </label>
+          </div>
+
+          <div class="panel">
             <div class="panel-title">About &amp; updates</div>
             <p class="panel-sub">Claude Helm runs <strong>100% locally</strong>. It reads your Claude Code history on this machine to build the dashboard — no account, no telemetry, nothing leaves your computer. The only optional network call is AI summaries, if you add your own API key above.</p>
             <div class="row" style="align-items:center">

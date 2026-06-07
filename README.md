@@ -51,6 +51,9 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 ### 📊 Monitor & 📈 Analyze
 - **Live engine** tails every transcript and computes, per project: **time spent**, **cost** (token×price estimate), sessions, tokens, tools used, files touched, and models.
 - **Card metrics** — time, cost, a 14-day activity sparkline, and a live **"● active now"** dot.
+- **Git status on cards** — current branch, dirty/clean, and ahead/behind your upstream, with the last commit on hover.
+- **Today's recap** — an end-of-day, AI-written standup of what you worked on across every project (with a factual fallback when no API key is set).
+- **Launch at login** — optionally start with your computer and sit in the tray, always monitoring.
 - **System tray** — today's time + cost at a glance, plus an active-session indicator. Closing the window keeps it monitoring in the tray.
 - **Desktop notifications** + **cost alerts** — get warned when a session finishes and when you hit 80%/100% of a weekly/monthly **budget**.
 - **Overview** — range selector (1D/7D/1M/3M), per-project history chart, **spend forecast**, **spend-by-model**, 30-day heatmap, and **CSV export**.
@@ -88,8 +91,7 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 ## 🔜 Coming soon
 
 - **Command palette** (Ctrl-K) to jump anywhere from the keyboard.
-- **Daily AI recap** — "what did I do today / this week" across all projects.
-- **Git status on cards** — branch, dirty/clean, ahead/behind, last commit.
+- **Weekly recap** — roll today's recap up into a "what did I do this week" digest.
 - **Real billed usage** via an Anthropic Admin API key (exact numbers for API/Console users).
 - **Code-signing** (removes the one-time "unidentified developer" prompts and enables macOS auto-update).
 

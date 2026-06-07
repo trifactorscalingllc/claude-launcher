@@ -286,6 +286,28 @@ class Indexer {
     return { labels, projects };
   }
 
+  // Per-project sessions active since `sinceMs` (for the daily recap). Returns
+  // [{ name, path, activeMs, cost, sessions:[{title, activeMs, cost, turns, lastTs}] }]
+  recapData(sinceMs) {
+    const out = [];
+    for (const cwd of Object.keys(this.store.projects)) {
+      const p = this.store.projects[cwd];
+      const sessions = [];
+      let activeMs = 0, cost = 0;
+      for (const id in p.sessions) {
+        const s = p.sessions[id];
+        if (!s.lastTs || s.lastTs < sinceMs) continue;
+        sessions.push({ title: s.title || '', activeMs: s.activeMs, cost: s.cost, turns: s.turns, lastTs: s.lastTs });
+        activeMs += s.activeMs; cost += s.cost;
+      }
+      if (!sessions.length) continue;
+      sessions.sort((a, b) => b.lastTs - a.lastTs);
+      out.push({ name: cwd.split(/[\\/]/).pop() || cwd, path: cwd, activeMs, cost, sessions });
+    }
+    out.sort((a, b) => b.activeMs - a.activeMs);
+    return out;
+  }
+
   metricsFor(projectPath) {
     const p = this.store.projects[projectPath];
     if (!p) return null;

@@ -7,6 +7,7 @@ const { Indexer } = require('./indexer');
 const { autoUpdater } = require('electron-updater');
 
 const HOME = app.getPath('home');
+const HIDDEN_LAUNCH = process.argv.includes('--hidden'); // passed by login-item when "start hidden"
 const CONFIG_PATH = path.join(app.getPath('userData'), 'launcher-config.json');
 const DEFAULT_ROOT = path.join(HOME, 'projects');
 const CLAUDE_PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
@@ -29,6 +30,8 @@ const DEFAULTS = {
   tags: {},            // { projectPath: "client"|"personal"|... }
   routines: [],        // recurring `claude -p` tasks
   redact: false,       // blur descriptions for screenshots/screen-sharing (off by default)
+  openAtLogin: false,  // launch Claude Helm when you log in
+  startHidden: false,  // when launched at login, start minimized to the tray
 };
 
 const AI_CACHE_PATH = path.join(app.getPath('userData'), 'ai-summaries.json');
@@ -295,6 +298,7 @@ function createWindow() {
     minHeight: 520,
     backgroundColor: '#f5f4ee',
     title: 'Claude Helm',
+    show: !HIDDEN_LAUNCH, // start in tray when launched at login with "start hidden"
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -362,12 +366,98 @@ ipcMain.handle('open-external', (_e, url) => {
   if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
 });
 
+// ---- git status (for project cards) ----
+const gitCache = new Map(); // path -> { time, data }
+const GIT_TTL = 15000;
+function git(projectPath, args) {
+  const r = spawnSync('git', args, { cwd: projectPath, encoding: 'utf8', timeout: 4000, windowsHide: true });
+  if (r.status !== 0 || r.error) return null;
+  return (r.stdout || '').trim();
+}
+function gitStatus(projectPath) {
+  const hit = gitCache.get(projectPath);
+  if (hit && Date.now() - hit.time < GIT_TTL) return hit.data;
+  let data = { isRepo: false };
+  try {
+    const inside = git(projectPath, ['rev-parse', '--is-inside-work-tree']);
+    if (inside === 'true') {
+      const branch = git(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']) || '';
+      const porcelain = git(projectPath, ['status', '--porcelain']);
+      const dirty = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
+      let ahead = 0, behind = 0;
+      const lr = git(projectPath, ['rev-list', '--count', '--left-right', '@{upstream}...HEAD']);
+      if (lr && /\d+\s+\d+/.test(lr)) { const [b, a] = lr.split(/\s+/).map(Number); behind = b || 0; ahead = a || 0; }
+      const last = git(projectPath, ['log', '-1', '--format=%h\x1f%cr\x1f%s']);
+      let commit = null;
+      if (last) { const [hash, rel, subject] = last.split('\x1f'); commit = { hash, rel, subject: (subject || '').slice(0, 100) }; }
+      data = { isRepo: true, branch, dirty, ahead, behind, commit };
+    }
+  } catch { /* not a repo / git missing */ }
+  gitCache.set(projectPath, { time: Date.now(), data });
+  return data;
+}
+ipcMain.handle('git-status', (_e, projectPath) => {
+  try { return gitStatus(projectPath); } catch { return { isRepo: false }; }
+});
+
+// ---- launch at login ----
+function applyLoginItem(cfg) {
+  try {
+    if (!app.isPackaged) return; // only meaningful for the installed app
+    app.setLoginItemSettings({
+      openAtLogin: !!cfg.openAtLogin,
+      args: cfg.startHidden ? ['--hidden'] : [],
+    });
+  } catch { /* unsupported platform */ }
+}
+ipcMain.handle('set-login-item', (_e, opts) => {
+  const cfg = loadConfig();
+  if (opts && 'openAtLogin' in opts) cfg.openAtLogin = !!opts.openAtLogin;
+  if (opts && 'startHidden' in opts) cfg.startHidden = !!opts.startHidden;
+  saveConfig(cfg);
+  applyLoginItem(cfg);
+  return { openAtLogin: cfg.openAtLogin, startHidden: cfg.startHidden };
+});
+
+ipcMain.handle('daily-recap', async (_e, opts) => {
+  const force = !!(opts && opts.force);
+  const cfg = loadConfig();
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const data = indexer.recapData(start.getTime());
+  const date = new Date().toISOString().slice(0, 10);
+  const totalMs = data.reduce((s, p) => s + p.activeMs, 0);
+  const totalCost = data.reduce((s, p) => s + p.cost, 0);
+  const projects = data.map((p) => ({
+    name: p.name, path: p.path, activeMs: p.activeMs, cost: p.cost,
+    sessions: p.sessions.length,
+    titles: p.sessions.map((s) => s.title).filter(Boolean).slice(0, 4),
+  }));
+  if (!data.length) return { date, empty: true, totalMs: 0, totalCost: 0, projects: [], hasKey: !!cfg.apiKey };
+
+  let narrative = null, aiError = null;
+  if (cfg.apiKey) {
+    const hash = crypto.createHash('sha1').update(JSON.stringify(projects)).digest('hex');
+    const cache = loadRecapCache();
+    const hit = cache[date];
+    if (!force && hit && hit.hash === hash && hit.narrative) {
+      narrative = hit.narrative;
+    } else {
+      try {
+        narrative = await generateRecap(projects, totalMs, totalCost, cfg.apiKey);
+        if (narrative) { cache[date] = { hash, narrative, time: Date.now() }; saveRecapCache(); }
+      } catch (err) { aiError = err.message; }
+    }
+  }
+  return { date, empty: false, totalMs, totalCost, projects, narrative, aiError, hasKey: !!cfg.apiKey };
+});
+
 app.whenReady().then(() => {
   createWindow();
   startWatchers();
   setupAutoUpdate();
   indexer.load();
   buildTray();
+  applyLoginItem(loadConfig()); // keep OS login-item in sync with saved setting
   setInterval(tick, 30000); // refresh tray + notification checks every 30s
   // backfill, then tell the renderer to refresh with full data
   runIndex().then(() => {
@@ -1163,6 +1253,41 @@ function saveAiCache() {
     fs.writeFileSync(tmp, JSON.stringify(aiCache));
     fs.renameSync(tmp, AI_CACHE_PATH);
   } catch {}
+}
+
+// ---- daily recap ----
+const RECAP_CACHE_PATH = path.join(app.getPath('userData'), 'daily-recap.json');
+let recapCache = null;
+function loadRecapCache() {
+  if (recapCache) return recapCache;
+  try { recapCache = JSON.parse(fs.readFileSync(RECAP_CACHE_PATH, 'utf8')); }
+  catch { recapCache = {}; }
+  return recapCache;
+}
+function saveRecapCache() {
+  try {
+    const tmp = RECAP_CACHE_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(recapCache));
+    fs.renameSync(tmp, RECAP_CACHE_PATH);
+  } catch {}
+}
+async function generateRecap(projects, totalMs, totalCost, apiKey) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey });
+  const hrs = totalMs / 3600000;
+  const lines = projects.map((p) => {
+    const t = (p.activeMs / 3600000).toFixed(1);
+    const titles = p.titles && p.titles.length ? ` — ${p.titles.join('; ')}` : '';
+    return `- ${p.name}: ${t}h, $${p.cost.toFixed(2)}, ${p.sessions} session(s)${titles}`;
+  }).join('\n');
+  const resp = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 400,
+    system: "You write a brief end-of-day standup recap for a developer, from their Claude Code activity today. 3-6 short, plain, factual bullet points about what was worked on and accomplished — no preamble, no headers, no fluff. Start each bullet with '- '. Refer to projects by name.",
+    messages: [{ role: 'user', content: `Today I spent ${hrs.toFixed(1)} hours total (~$${totalCost.toFixed(2)}) across these projects:\n\n${lines}\n\nWrite the recap.` }],
+  });
+  const text = (resp.content.find((b) => b.type === 'text') || {}).text || '';
+  return text.trim();
 }
 
 function gitLog(projectPath, n) {
