@@ -64,6 +64,7 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 ### 🔎 Search & read
 - **Unified search** across every conversation **and** your saved context/memory — highlighted snippets, filter by project / date / role.
 - **In-app transcript viewer** — read the full conversation as a clean chat; jump straight from a search hit to the exact message.
+- **Branch a conversation** — fork any past session into a new Claude Code session (`--resume … --fork-session`) straight from the transcript or a session row. The original stays untouched, so you can explore a different direction without losing your thread.
 
 <div align="center"><img src="docs/feat-search.png" width="820" alt="Search across conversations and context" /></div>
 

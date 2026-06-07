@@ -503,7 +503,14 @@ function buildClaudeCommand(launch) {
   if (launch.model && launch.model !== 'default') {
     parts.push('--model', launch.model);
   }
-  if (launch.continue) parts.push('--continue');
+  if (launch.resume) {
+    // resume a specific conversation; --fork-session branches it into a NEW
+    // session id so the original transcript is left untouched.
+    parts.push('--resume', launch.resume);
+    if (launch.fork) parts.push('--fork-session');
+  } else if (launch.continue) {
+    parts.push('--continue');
+  }
   if (launch.skipPermissions) parts.push('--dangerously-skip-permissions');
   return parts.join(' ');
 }
@@ -808,6 +815,21 @@ ipcMain.handle('open-project', (_e, projectPath, overrides) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+// Session ids are uuids — validate before putting on a command line.
+const SESSION_ID_RE = /^[0-9a-fA-F][0-9a-fA-F-]{7,63}$/;
+ipcMain.handle('branch-session', (_e, cwd, sessionId) => {
+  try {
+    if (!cwd || !SESSION_ID_RE.test(String(sessionId || ''))) return { ok: false, error: 'Invalid session.' };
+    return openClaudeIn(cwd, { resume: sessionId, fork: true, continue: false });
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('resume-session', (_e, cwd, sessionId) => {
+  try {
+    if (!cwd || !SESSION_ID_RE.test(String(sessionId || ''))) return { ok: false, error: 'Invalid session.' };
+    return openClaudeIn(cwd, { resume: sessionId, fork: false, continue: false });
+  } catch (err) { return { ok: false, error: err.message }; }
 });
 
 ipcMain.handle('set-budget', (_e, b) => {

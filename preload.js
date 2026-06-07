@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('launcher', {
   openMemoryFolder: () => ipcRenderer.invoke('open-memory-folder'),
   searchTranscripts: (query, filters) => ipcRenderer.invoke('search-transcripts', query, filters),
   readTranscript: (args) => ipcRenderer.invoke('read-transcript', args),
+  branchSession: (cwd, sessionId) => ipcRenderer.invoke('branch-session', cwd, sessionId),
+  resumeSession: (cwd, sessionId) => ipcRenderer.invoke('resume-session', cwd, sessionId),
   openProject: (projectPath, overrides) => ipcRenderer.invoke('open-project', projectPath, overrides),
   setBudget: (b) => ipcRenderer.invoke('set-budget', b),
   setNotifications: (on) => ipcRenderer.invoke('set-notifications', on),

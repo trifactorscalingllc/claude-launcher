@@ -29,6 +29,7 @@ const ICONS = {
   archive: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>',
   tag: '<path d="M20.6 13.4 11 3.8a2 2 0 0 0-1.4-.6H4a1 1 0 0 0-1 1v5.6a2 2 0 0 0 .6 1.4l9.6 9.6a2 2 0 0 0 2.8 0l4.6-4.6a2 2 0 0 0 0-2.8z"/>',
   bolt: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
+  branch: '<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
 };
 
 function svg(name, w = 17) {
@@ -493,6 +494,7 @@ function switchView(view) {
 
 // ---------- Transcript viewer ----------
 let transcriptReturn = 'projects';
+let currentTranscriptCtx = null; // { cwd, sessionId } for Branch/Resume
 
 function renderMessage(m) {
   const who = m.role === 'user' ? 'You' : 'Claude';
@@ -519,6 +521,13 @@ async function openTranscript(args, fromView, scrollTs) {
   bodyEl.innerHTML = '<p class="empty">Loading conversation…</p>';
 
   const d = await window.launcher.readTranscript(args);
+  // capture session context for Branch / Resume
+  const ctxCwd = args.cwd || d.project || '';
+  const ctxSession = args.sessionId || d.sessionId || '';
+  currentTranscriptCtx = (ctxCwd && ctxSession) ? { cwd: ctxCwd, sessionId: ctxSession } : null;
+  const tBranch = root.querySelector('.t-branch');
+  const tResume = root.querySelector('.t-resume');
+  [tBranch, tResume].forEach((b) => { if (b) b.disabled = !currentTranscriptCtx; });
   if (d.error || !d.messages.length) {
     root.querySelector('.t-title').textContent = 'Session';
     bodyEl.innerHTML = `<p class="empty">${escapeHtml(d.error || 'No readable messages in this session.')}</p>`;
@@ -893,15 +902,26 @@ async function openDetail(p) {
         <div class="panel-title">Sessions (${sessions.length})</div>
         <div class="session-list">
         ${sessions.map(([id, s]) => `<div class="session-row" data-session="${escapeHtml(id)}">
-            <div class="s-title">${escapeHtml(s.title || 'Untitled session')} <span class="s-open">read ›</span></div>
-            <div class="s-meta">${relTime(s.lastTs)} · ${fmtDuration(s.activeMs)} · ${fmtCost(s.cost)} · ${s.turns} turns</div>
+            <div class="s-main">
+              <div class="s-title">${escapeHtml(s.title || 'Untitled session')} <span class="s-open">read ›</span></div>
+              <div class="s-meta">${relTime(s.lastTs)} · ${fmtDuration(s.activeMs)} · ${fmtCost(s.cost)} · ${s.turns} turns</div>
+            </div>
+            <button class="s-branch" title="Fork this conversation into a new Claude Code session (original untouched)">${svg('branch', 14)} Branch</button>
           </div>`).join('')}
         </div>
       </div>
     </div>`;
 
-  body.querySelectorAll('.session-row[data-session]').forEach((row) =>
-    row.addEventListener('click', () => openTranscript({ cwd: p.path, sessionId: row.dataset.session }, 'detail')));
+  body.querySelectorAll('.session-row[data-session]').forEach((row) => {
+    row.addEventListener('click', () => openTranscript({ cwd: p.path, sessionId: row.dataset.session }, 'detail'));
+    const bb = row.querySelector('.s-branch');
+    if (bb) bb.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const r = await window.launcher.branchSession(p.path, row.dataset.session);
+      if (r && r.ok) showStatus('Branched — a new forked session is opening in Claude Code. The original is untouched.', 'ok');
+      else showStatus((r && r.error) || 'Could not branch this session.', 'warn');
+    });
+  });
 }
 
 // ---------- overview (Phase 4) ----------
@@ -1190,6 +1210,18 @@ async function init() {
     n.addEventListener('click', () => switchView(n.dataset.view)));
   document.querySelector('#view-detail .back-btn').addEventListener('click', () => switchView('projects'));
   document.querySelector('#view-transcript .t-back').addEventListener('click', () => switchView(transcriptReturn));
+  document.querySelector('#view-transcript .t-branch').addEventListener('click', async () => {
+    if (!currentTranscriptCtx) return;
+    const r = await window.launcher.branchSession(currentTranscriptCtx.cwd, currentTranscriptCtx.sessionId);
+    if (r && r.ok) showStatus('Branched — a new forked session is opening in Claude Code. The original is untouched.', 'ok');
+    else showStatus((r && r.error) || 'Could not branch this session.', 'warn');
+  });
+  document.querySelector('#view-transcript .t-resume').addEventListener('click', async () => {
+    if (!currentTranscriptCtx) return;
+    const r = await window.launcher.resumeSession(currentTranscriptCtx.cwd, currentTranscriptCtx.sessionId);
+    if (r && r.ok) showStatus('Resuming this conversation in Claude Code…', 'ok');
+    else showStatus((r && r.error) || 'Could not resume this session.', 'warn');
+  });
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.addEventListener('click', () => loadOverview(Number(b.dataset.days))));
   $('openMemory').addEventListener('click', () => window.launcher.openMemoryFolder());
