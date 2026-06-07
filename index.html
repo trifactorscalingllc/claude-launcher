@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="burst" id="burst"></span>
+        <div class="logo-text">
+          <span class="wordmark">Claude Helm</span>
+          <span class="eyebrow">Project Dashboard</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="projects">
+          <span class="ico" data-ico="grid"></span> Projects
+        </button>
+        <button class="nav-item" data-view="search">
+          <span class="ico" data-ico="search"></span> Search
+        </button>
+        <button class="nav-item" data-view="overview">
+          <span class="ico" data-ico="chart"></span> Overview
+        </button>
+        <button class="nav-item" data-view="context">
+          <span class="ico" data-ico="brain"></span> Context
+        </button>
+        <button class="nav-item" data-view="routines">
+          <span class="ico" data-ico="repeat"></span> Routines
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="ico" data-ico="gear"></span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button id="themeToggle" class="theme-toggle">
+          <span class="ico" data-ico="moon"></span><span class="theme-label">Dark mode</span>
+        </button>
+        <div class="foot-label">PROJECTS FOLDER</div>
+        <code id="footRoot" title="Change in Settings">…</code>
+        <div class="foot-stat" id="footCount"></div>
+        <div class="foot-ver" id="footVer"></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Projects view -->
+      <section id="view-projects" class="view">
+        <header class="topbar">
+          <div class="search">
+            <span class="ico" data-ico="search"></span>
+            <input id="search" type="text" placeholder="Search projects…" autocomplete="off" spellcheck="false" />
+          </div>
+          <button id="newBtn" class="btn primary">
+            <span class="ico" data-ico="plus"></span> New project
+          </button>
+        </header>
+
+        <div class="scroll">
+          <div id="status" class="banner hidden"></div>
+
+          <div id="pinnedWrap" class="hidden">
+            <div class="section-head"><span class="ico" data-ico="star"></span> Pinned</div>
+            <div id="pinnedGrid" class="grid"></div>
+          </div>
+
+          <div class="section-head">
+            <span class="ico" data-ico="grid"></span> All projects
+            <span id="allCount" class="count"></span>
+          </div>
+          <div id="grid" class="grid"></div>
+          <p id="empty" class="empty hidden"></p>
+
+          <div id="externalWrap" class="hidden">
+            <div class="section-head">
+              <span class="ico" data-ico="layers"></span> Other Claude projects
+              <span id="externalCount" class="count"></span>
+            </div>
+            <p class="section-note">Projects with Claude activity that live outside your projects folder (e.g. sessions you ran from home).</p>
+            <div id="externalGrid" class="grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings view -->
+      <section id="view-settings" class="view hidden">
+        <header class="topbar">
+          <h2 class="view-title">Settings</h2>
+        </header>
+        <div class="scroll">
+          <div class="panel">
+            <div class="panel-title">Projects folder</div>
+            <p class="panel-sub">The folder scanned for projects. Each subfolder is one project.</p>
+            <div class="row">
+              <code id="setRoot" class="path-box">…</code>
+              <button id="changeRoot" class="btn ghost">Change folder</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Launch options</div>
+            <p class="panel-sub">Applied every time you open a project in Claude Code.</p>
+
+            <label class="field">
+              <span>Model</span>
+              <select id="optModel">
+                <option value="default">Default (account setting)</option>
+                <option value="opus">Opus — most capable</option>
+                <option value="sonnet">Sonnet — balanced</option>
+                <option value="haiku">Haiku — fastest</option>
+              </select>
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="optContinue" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Continue last session</strong>
+                <em>Resume the previous conversation (<code>--continue</code>)</em>
+              </span>
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="optSkip" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Skip permission prompts</strong>
+                <em>Runs with <code>--dangerously-skip-permissions</code>. Use with care.</em>
+              </span>
+            </label>
+
+            <div class="cmd-preview">
+              <span class="foot-label">COMMAND</span>
+              <code id="cmdPreview">claude</code>
+            </div>
+
+            <label class="field" style="margin-top:18px">
+              <span>Terminal <span class="panel-hint" style="margin-left:0">advanced · leave blank for auto-detect (<span id="osName">…</span>)</span></span>
+              <input id="optTerminal" type="text" placeholder="custom command, e.g. wezterm start --cwd {dir} -- bash -c &quot;{cmd}&quot;" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="panel-sub" style="margin-top:4px">Use <code>{dir}</code> for the project path and <code>{cmd}</code> for the Claude command. Only set this if auto-detect doesn't find your terminal.</div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">AI project summaries</div>
+            <p class="panel-sub">Generate a one-line "what this is + where it stands" per project with Claude (<code>claude-opus-4-8</code>). Summaries are cached and only regenerate when the project changes. Your key is stored locally in this app's config.</p>
+
+            <label class="field">
+              <span>Anthropic API key</span>
+              <input id="optApiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+            </label>
+
+            <label class="toggle">
+              <input type="checkbox" id="optAiSummaries" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Use AI summaries on cards</strong>
+                <em>When off, cards use a fast offline summary (README / git / session title).</em>
+              </span>
+            </label>
+            <div id="apiKeyHint" class="panel-sub" style="margin:6px 0 0"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Overview view -->
+      <section id="view-overview" class="view hidden">
+        <header class="topbar">
+          <h2 class="view-title">Overview</h2>
+          <div class="range-toggle" id="rangeToggle">
+            <button data-days="1">1 Day</button>
+            <button data-days="7" class="active">7 Days</button>
+            <button data-days="30">1 Month</button>
+            <button data-days="90">3 Months</button>
+          </div>
+        </header>
+        <div class="scroll">
+          <div id="overview-body"></div>
+        </div>
+      </section>
+
+      <!-- Search view -->
+      <section id="view-search" class="view hidden">
+        <header class="topbar search-topbar">
+          <div class="search">
+            <span class="ico" data-ico="search"></span>
+            <input id="searchInput" type="text" placeholder="Search your Claude history… e.g. webhook" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="search-filters">
+            <select id="filterProject" class="filter-sel" title="Project"><option value="">All projects</option></select>
+            <div class="seg" id="filterRole">
+              <button data-role="all" class="active">All</button>
+              <button data-role="user">You</button>
+              <button data-role="assistant">Claude</button>
+            </div>
+            <select id="filterDate" class="filter-sel" title="Date range">
+              <option value="0">Any time</option>
+              <option value="1">Last 24h</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 3 months</option>
+            </select>
+          </div>
+        </header>
+        <div class="scroll">
+          <div id="search-body"><p class="empty">Search across every Claude Code conversation — find when and where you worked on something.</p></div>
+        </div>
+      </section>
+
+      <!-- Context view -->
+      <section id="view-context" class="view hidden">
+        <header class="topbar">
+          <h2 class="view-title">Context</h2>
+          <button id="openMemory" class="btn ghost" style="margin-left:auto"><span class="ico" data-ico="folder"></span> Memory folder</button>
+        </header>
+        <div class="scroll">
+          <p class="section-note" style="margin-top:0">What Claude has on file about you — who you are, how you like to work, your projects, and references. Pulled live from Claude's memory. Editing happens through Claude, not here.</p>
+          <div id="context-body"></div>
+        </div>
+      </section>
+
+      <!-- Routines view (draft) -->
+      <section id="view-routines" class="view hidden">
+        <header class="topbar">
+          <h2 class="view-title">Routines</h2>
+        </header>
+        <div class="scroll">
+          <div id="routines-body"></div>
+        </div>
+      </section>
+
+      <!-- Transcript viewer -->
+      <section id="view-transcript" class="view hidden">
+        <header class="topbar detail-bar">
+          <button class="btn ghost t-back"><span class="ico" data-ico="back"></span> Back</button>
+          <div class="detail-titles">
+            <h2 class="t-title view-title">Session</h2>
+            <code class="t-sub"></code>
+          </div>
+        </header>
+        <div class="scroll">
+          <div class="t-body"></div>
+        </div>
+      </section>
+
+      <!-- Project detail view -->
+      <section id="view-detail" class="view hidden">
+        <header class="topbar detail-bar">
+          <button class="btn ghost back-btn"><span class="ico" data-ico="back"></span> Projects</button>
+          <div class="detail-titles">
+            <h2 class="detail-name view-title">Project</h2>
+            <code class="detail-path"></code>
+            <div class="detail-summary hidden"></div>
+          </div>
+        </header>
+        <div class="scroll">
+          <div class="detail-body"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Auto-update toast -->
+  <div id="updateToast" class="update-toast hidden">
+    <span class="ico" data-ico="repeat"></span>
+    <span id="updateMsg" class="update-msg"></span>
+    <button id="updateInstall" class="btn primary hidden">Restart &amp; update</button>
+  </div>
+
+  <!-- New project modal -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-burst"><span class="burst" id="modalBurst"></span></div>
+      <h3>New project</h3>
+      <p class="modal-sub">Creates a folder in your projects directory and opens Claude Code in it.</p>
+      <input id="newName" type="text" placeholder="my-new-project" autocomplete="off" spellcheck="false" />
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn ghost">Cancel</button>
+        <button id="modalCreate" class="btn primary">Create &amp; open</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
