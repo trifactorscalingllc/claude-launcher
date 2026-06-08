@@ -644,6 +644,8 @@ select:focus { outline: none; border-color: var(--clay); }
 
 /* ---- version label ---- */
 .foot-ver { margin-top: 8px; font-size: 10.5px; color: var(--muted); letter-spacing: 0.02em; }
+.beta-tag { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--clay-deep); background: rgba(217,119,87,0.14); border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; }
 
 /* ---- onboarding + robustness banners ---- */
 .banner.warn { color: #8a5a2b; border-color: #e6c48a; background: #fbf3e2; }

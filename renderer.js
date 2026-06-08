@@ -36,6 +36,14 @@ const ICONS = {
 // Shown on every cost figure so the dollar number is never mistaken for a bill.
 const COST_TIP = "Estimate — your recorded token usage × Anthropic's public API prices. On a Pro/Max subscription you aren't billed per token, so treat this as a usage measure, not a bill.";
 
+// Releases ship as 3-part semver (auto-updater requirement). We DISPLAY a padded
+// 5-part version + a beta tag, since this is pre-production (V2 will be the next gen).
+function displayVersion(v) {
+  const parts = String(v || '0').split('.');
+  while (parts.length < 5) parts.push('0');
+  return parts.slice(0, 5).join('.');
+}
+
 function svg(name, w = 17) {
   return `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 }
@@ -791,7 +799,7 @@ async function loadRoutines() {
   const body = $('routines-body');
   const routines = await window.launcher.getRoutines();
   let html = `<div class="routines-top">
-      <p class="section-note" style="margin:0">Recurring Claude Code tasks. Each runs <code>claude -p</code> in a project on your schedule and shows the result here.</p>
+      <p class="section-note" style="margin:0">Recurring Claude Code tasks. Each runs <code>claude -p</code> in a project on your schedule and shows the result here. They run while Claude Helm is open (keep it in the tray) — a missed run catches up next time you open the app.</p>
       <button id="newRoutine" class="btn primary">${svg('plus', 16)} New routine</button>
     </div>`;
   if (!routines.length) {
@@ -1655,7 +1663,7 @@ async function init() {
   setTimeout(() => { if (!indexed) $('indexBanner').classList.remove('hidden'); }, 700);
   const clearIndex = () => { indexed = true; $('indexBanner').classList.add('hidden'); };
   setTimeout(clearIndex, 12000); // fallback
-  window.launcher.appVersion().then((v) => { $('footVer').textContent = 'Claude Helm v' + v; });
+  window.launcher.appVersion().then((v) => { $('footVer').innerHTML = `Claude Helm v${displayVersion(v)} <span class="beta-tag">beta</span>`; });
   $('footRoot').textContent = cfg.root;
   await loadProjects();
 
@@ -1769,7 +1777,7 @@ async function init() {
   const uinstall = $('updateInstall');
   const ustate = $('updateState');      // Settings → About panel
   uinstall.addEventListener('click', () => window.launcher.installUpdate());
-  window.launcher.appVersion().then((v) => { $('aboutVer').textContent = 'Claude Helm v' + v; });
+  window.launcher.appVersion().then((v) => { $('aboutVer').innerHTML = `Claude Helm v${displayVersion(v)} <span class="beta-tag">beta</span>`; });
   $('repoLink').addEventListener('click', (e) => { e.preventDefault(); window.launcher.openExternal('https://github.com/trifactorscalingllc/claude-helm'); });
   let checkedManually = false;
   $('checkUpdate').addEventListener('click', () => {

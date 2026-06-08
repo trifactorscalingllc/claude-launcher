@@ -201,6 +201,12 @@ function sendRoutines() {
 }
 
 const runningRoutines = new Set();
+const MAX_CONCURRENT_ROUTINES = 2; // don't spawn a swarm of claude processes at once
+const ROUTINE_TIMEOUT_MS = 10 * 60 * 1000;
+function friendlyRoutineErr(msg) {
+  if (/ENOENT/i.test(msg || '')) return 'Claude Code CLI not found on PATH — install it from claude.com/claude-code to run routines.';
+  return msg || 'Unknown error.';
+}
 function runRoutine(routine) {
   if (runningRoutines.has(routine.id)) return;
   runningRoutines.add(routine.id);
@@ -212,24 +218,24 @@ function runRoutine(routine) {
   if (routine.model && routine.model !== 'default') args.push('--model', routine.model);
   if (routine.autonomous) args.push('--permission-mode', 'acceptEdits');
 
-  let out = '', err = '';
-  let child;
+  let out = '', err = '', timedOut = false, child;
   try {
     child = spawn(bin, args, { cwd: routine.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
     runningRoutines.delete(routine.id);
-    finishRoutine(routine.id, 'error', '', e.message);
+    finishRoutine(routine.id, 'error', '', friendlyRoutineErr(e.message));
     return;
   }
-  const timer = setTimeout(() => { try { child.kill(); } catch {} }, 10 * 60 * 1000);
+  const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch {} }, ROUTINE_TIMEOUT_MS);
   child.stdout.on('data', (d) => { out += d; if (out.length > 24000) out = out.slice(-24000); });
   child.stderr.on('data', (d) => { err += d; });
-  child.on('error', (e) => { clearTimeout(timer); runningRoutines.delete(routine.id); finishRoutine(routine.id, 'error', '', e.message); });
+  child.on('error', (e) => { clearTimeout(timer); runningRoutines.delete(routine.id); finishRoutine(routine.id, 'error', '', friendlyRoutineErr(e.message)); });
   child.on('close', (code) => {
     clearTimeout(timer);
     runningRoutines.delete(routine.id);
+    if (timedOut) { finishRoutine(routine.id, 'error', out.trim(), 'Timed out after 10 minutes — the routine was stopped.'); return; }
     const status = code === 0 ? 'ok' : 'error';
-    finishRoutine(routine.id, status, out.trim(), status === 'error' ? (err.trim() || `exited with code ${code}`) : '');
+    finishRoutine(routine.id, status, out.trim(), status === 'error' ? friendlyRoutineErr(err.trim() || `exited with code ${code}`) : '');
   });
 }
 function finishRoutine(id, status, output, error) {
@@ -256,6 +262,7 @@ function checkRoutines() {
   const cfg = loadConfig();
   const now = Date.now();
   for (const r of (cfg.routines || [])) {
+    if (runningRoutines.size >= MAX_CONCURRENT_ROUTINES) break; // cap concurrent runs; rest catch up next tick
     if (routineDue(r, now) && !runningRoutines.has(r.id)) runRoutine(r);
   }
 }
