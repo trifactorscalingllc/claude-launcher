@@ -786,6 +786,7 @@ body.redact .recap-list {
 .ap-leg { display: inline-flex; align-items: center; gap: 6px; }
 .ap-leg b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .ap-sw { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.ap-sw.bar { width: 5px; height: 12px; background: var(--clay); border-radius: 1px; }
 .ap-leg-x { margin-left: auto; font-style: normal; opacity: 0.8; }
 
 /* ---- command palette (⌘K) ---- */

@@ -1569,7 +1569,7 @@ async function init() {
     clearIndex();
     if (scope === 'projects') reconcileProjects();
     else refreshLiveMetrics();
-    refreshActivePanel();
+    sampleActiveUsage(); // immediate sample on activity
     // the Overview is a heavy "report" view — refresh it at most every 25s while open
     if (!$('view-overview').classList.contains('hidden') && Date.now() - lastOverviewLive > 25000) {
       lastOverviewLive = Date.now();
@@ -1577,17 +1577,20 @@ async function init() {
     }
   });
 
-  refreshActivePanel();
-  // lightweight tick: keep the active project's numbers current and clear the "active"
-  // dot once a session goes idle — all in place, never a grid rebuild.
-  setInterval(() => { refreshLiveMetrics(); refreshActivePanel(); }, 15000);
+  // live token-usage bars sample on a fixed 2s cadence so they tick in real time
+  sampleActiveUsage();
+  setInterval(sampleActiveUsage, 2000);
+  // slower tick: keep the project grid's active card numbers current + clear the dot
+  setInterval(refreshLiveMetrics, 15000);
 }
 
 // ---------- live "Active now" panels (one card per running session) ----------
-let activeTimer = null;
+let activeClockTimer = null;
 const activeCards = new Map();    // sessionId -> card element
-const sessionSamples = new Map(); // sessionId -> [{t, tokens, cost}]
+const sessionBars = new Map();    // sessionId -> [{t, dTok, dCost}]  per-interval USAGE
+const sessionLast = new Map();    // sessionId -> {tokens, cost}      for delta math
 const sessionModels = new Map();  // sessionId -> Set(model)
+const BAR_WINDOW = 70;            // ~70 bars × 2s ≈ last ~2.3 min of activity
 
 function modelShort(m) {
   if (!m) return '';
@@ -1601,73 +1604,81 @@ function fmtClock(ms) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
   return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
 }
-function recordSample(a) {
-  let arr = sessionSamples.get(a.sessionId);
-  if (!arr) { arr = []; sessionSamples.set(a.sessionId, arr); }
-  const last = arr[arr.length - 1];
-  if (!(last && last.tokens === a.tokens && last.cost === a.cost)) {
-    arr.push({ t: Date.now(), tokens: a.tokens, cost: a.cost });
-    if (arr.length > 240) arr.shift();
-  }
-  let ms = sessionModels.get(a.sessionId);
-  if (!ms) { ms = new Set(); sessionModels.set(a.sessionId, ms); }
-  (a.models || []).forEach((m) => ms.add(m));
-}
 function modelChips(id) {
   return [...(sessionModels.get(id) || [])].map((m) => `<span class="ap-model">${escapeHtml(modelShort(m))}</span>`).join('');
 }
-// Live multi-line graph: x = time; tokens (clay) and cost (green) each scaled to
-// their own range so both trends show. They diverge when the model mix changes
-// (cost-per-token differs by model) — the interesting signal.
-function sessionGraphSvg(samples) {
-  if (!samples || samples.length < 2) return '<div class="ap-graph-empty">Building live graph — keep working and the lines fill in…</div>';
-  const W = 600, H = 130, pad = 12;
-  const t0 = samples[0].t, t1 = samples[samples.length - 1].t;
-  const span = Math.max(1, t1 - t0);
-  const X = (t) => pad + ((t - t0) / span) * (W - 2 * pad);
-  const lineFor = (key, color) => {
-    const vals = samples.map((s) => s[key]);
-    const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1;
-    const Y = (v) => pad + (1 - (v - mn) / rng) * (H - 2 * pad);
-    const pts = samples.map((s) => `${X(s.t).toFixed(1)},${Y(s[key]).toFixed(1)}`).join(' ');
-    const lx = X(samples[samples.length - 1].t).toFixed(1), ly = Y(vals[vals.length - 1]).toFixed(1);
-    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx}" cy="${ly}" r="3.2" fill="${color}"/>`;
-  };
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="ap-graph-svg">
-    <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" class="ap-grid"/>
-    ${lineFor('tokens', '#d97757')}
-    ${lineFor('cost', '#4f7d5b')}
-  </svg>`;
+// Record one usage bar = tokens consumed since the previous sample. First sighting
+// just sets the baseline (no giant first bar). Idle intervals push a zero bar so
+// the graph scrolls and you can see the gaps between bursts.
+function recordBar(a) {
+  const prev = sessionLast.get(a.sessionId);
+  sessionLast.set(a.sessionId, { tokens: a.tokens, cost: a.cost });
+  let ms = sessionModels.get(a.sessionId);
+  if (!ms) { ms = new Set(); sessionModels.set(a.sessionId, ms); }
+  (a.models || []).forEach((m) => ms.add(m));
+  if (!sessionBars.has(a.sessionId)) sessionBars.set(a.sessionId, []);
+  if (!prev) return; // baseline only
+  const dTok = Math.max(0, a.tokens - prev.tokens);
+  const dCost = Math.max(0, a.cost - prev.cost);
+  const arr = sessionBars.get(a.sessionId);
+  arr.push({ t: Date.now(), dTok, dCost });
+  if (arr.length > BAR_WINDOW) arr.shift();
+}
+// Live token-usage bar graph: each bar = tokens used in that ~2s interval. Bars
+// spike while the session is generating and fall to zero when it's idle.
+function usageBarsSvg(bars) {
+  if (!bars || !bars.length || bars.every((b) => b.dTok === 0)) {
+    return '<div class="ap-graph-empty">Waiting for token activity — bars rise live as this session uses tokens.</div>';
+  }
+  const W = 600, H = 130, gap = 1.5;
+  const bw = W / BAR_WINDOW;
+  const max = Math.max(1, ...bars.map((b) => b.dTok));
+  const start = BAR_WINDOW - bars.length; // right-align newest bar
+  const rects = bars.map((b, i) => {
+    const h = (b.dTok / max) * (H - 3);
+    const x = (start + i) * bw + gap / 2;
+    return `<rect x="${x.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(1, bw - gap).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="1" fill="${i === bars.length - 1 ? '#c25c3b' : '#d97757'}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="ap-graph-svg">${rects}</svg>`;
+}
+function peakUsage(bars) {
+  if (!bars || !bars.length) return 0;
+  return Math.max(0, ...bars.map((b) => b.dTok));
+}
+function lastUsage(bars) {
+  if (!bars || !bars.length) return 0;
+  return bars[bars.length - 1].dTok;
 }
 
-async function refreshActivePanel() {
+// Poll the active sessions on a fixed cadence so the usage bars are truly live.
+async function sampleActiveUsage() {
   const panel = $('activePanel');
   if (!panel) return;
   const list = await window.launcher.activeSessions();
   if (!list || !list.length) {
     panel.classList.add('hidden'); panel.innerHTML = '';
-    activeCards.clear(); sessionSamples.clear(); sessionModels.clear();
-    if (activeTimer) { clearInterval(activeTimer); activeTimer = null; }
+    activeCards.clear(); sessionBars.clear(); sessionLast.clear(); sessionModels.clear();
     return;
   }
   panel.classList.remove('hidden');
   const ids = new Set(list.map((a) => a.sessionId));
   for (const [id, el] of activeCards) { // drop sessions that went idle
-    if (!ids.has(id)) { el.remove(); activeCards.delete(id); sessionSamples.delete(id); sessionModels.delete(id); }
+    if (!ids.has(id)) { el.remove(); activeCards.delete(id); sessionBars.delete(id); sessionLast.delete(id); sessionModels.delete(id); }
   }
   list.forEach((a) => {
-    recordSample(a);
+    recordBar(a);
     if (activeCards.has(a.sessionId)) updateActiveCard(a);
     else { const el = buildActiveCard(a); activeCards.set(a.sessionId, el); panel.appendChild(el); }
   });
   panel.classList.toggle('multi', list.length > 1);
-  if (!activeTimer) activeTimer = setInterval(tickActivePanels, 1000);
+  if (!activeClockTimer) activeClockTimer = setInterval(tickActivePanels, 1000);
 }
 function buildActiveCard(a) {
   const el = document.createElement('div');
   el.className = 'active-card';
   el.dataset.session = a.sessionId;
   const first = a.firstTs || a.lastTs;
+  const bars = sessionBars.get(a.sessionId);
   el.innerHTML = `
     <div class="ap-head"><span class="ap-dot"></span> ACTIVE NOW <span class="ap-models">${modelChips(a.sessionId)}</span></div>
     <div class="ap-name">${escapeHtml(a.name)}</div>
@@ -1676,11 +1687,12 @@ function buildActiveCard(a) {
       <span class="ap-tokens">${fmtNum(a.tokens)} tokens</span>
       <span class="ap-cost" title="${COST_TIP}">${fmtCost(a.cost)} <span class="est">est.</span></span>
     </div>
-    <div class="ap-graph"><div class="ap-graph-inner">${sessionGraphSvg(sessionSamples.get(a.sessionId))}</div></div>
+    <div class="ap-graph"><div class="ap-graph-inner">${usageBarsSvg(bars)}</div></div>
     <div class="ap-legend">
-      <span class="ap-leg"><span class="ap-sw" style="background:#d97757"></span>tokens <b class="ap-leg-tok">${fmtNum(a.tokens)}</b></span>
-      <span class="ap-leg"><span class="ap-sw" style="background:#4f7d5b"></span>cost <b class="ap-leg-cost">${fmtCost(a.cost)}</b> <span class="est">est.</span></span>
-      <span class="ap-leg-x">live · over session time</span>
+      <span class="ap-leg"><span class="ap-sw bar"></span>token usage / live</span>
+      <span class="ap-leg">now <b class="ap-leg-now">${fmtNum(lastUsage(bars))}</b></span>
+      <span class="ap-leg">peak <b class="ap-leg-peak">${fmtNum(peakUsage(bars))}</b></span>
+      <span class="ap-leg-x">last ~2 min</span>
     </div>
     <div class="ap-actions">
       <button class="btn primary ap-open">${svg('terminal', 15)} Open</button>
@@ -1692,13 +1704,14 @@ function buildActiveCard(a) {
 }
 function updateActiveCard(a) {
   const el = activeCards.get(a.sessionId); if (!el) return;
+  const bars = sessionBars.get(a.sessionId);
   const set = (sel, html) => { const n = el.querySelector(sel); if (n) n.innerHTML = html; };
   set('.ap-tokens', `${fmtNum(a.tokens)} tokens`);
   set('.ap-cost', `${fmtCost(a.cost)} <span class="est">est.</span>`);
   set('.ap-models', modelChips(a.sessionId));
-  set('.ap-leg-tok', fmtNum(a.tokens));
-  set('.ap-leg-cost', fmtCost(a.cost));
-  const g = el.querySelector('.ap-graph-inner'); if (g) g.innerHTML = sessionGraphSvg(sessionSamples.get(a.sessionId));
+  set('.ap-leg-now', fmtNum(lastUsage(bars)));
+  set('.ap-leg-peak', fmtNum(peakUsage(bars)));
+  const g = el.querySelector('.ap-graph-inner'); if (g) g.innerHTML = usageBarsSvg(bars);
 }
 function tickActivePanels() {
   document.querySelectorAll('#activePanel .ap-clock').forEach((clk) => {
