@@ -30,6 +30,7 @@ const ICONS = {
   tag: '<path d="M20.6 13.4 11 3.8a2 2 0 0 0-1.4-.6H4a1 1 0 0 0-1 1v5.6a2 2 0 0 0 .6 1.4l9.6 9.6a2 2 0 0 0 2.8 0l4.6-4.6a2 2 0 0 0 0-2.8z"/>',
   bolt: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
   branch: '<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.5 14a8.5 8.5 0 1 1 17 0"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>',
 };
 
 // Shown on every cost figure so the dollar number is never mistaken for a bill.
@@ -548,12 +549,13 @@ async function saveLaunch(patch) {
 // ---------- views ----------
 function switchView(view) {
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === view));
-  ['projects', 'search', 'settings', 'overview', 'detail', 'context', 'routines', 'transcript'].forEach((v) => {
+  ['projects', 'search', 'settings', 'overview', 'analytics', 'detail', 'context', 'routines', 'transcript'].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', view !== v);
   });
   if (view === 'settings') syncSettingsUI();
   if (view === 'overview') loadOverview();
+  if (view === 'analytics') loadAnalytics();
   if (view === 'context') loadContext();
   if (view === 'routines') loadRoutines();
   if (view === 'search') loadSearch();
@@ -1144,36 +1146,22 @@ function insightsBlock(ins) {
   return `<div class="detail-grid">${eff}${trends}</div>${top}`;
 }
 
-async function loadOverview(days) {
-  overviewDays = days || overviewDays || 7;
-  document.querySelectorAll('#rangeToggle button').forEach((b) =>
-    b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
-
-  const [res, bs, ms, ins, mcp] = await Promise.all([
-    window.launcher.overviewMetrics(overviewDays),
+// Overview = glanceable dashboard (fixed last-7-days): KPIs, recap, budget, heatmap.
+async function loadOverview() {
+  const [res, bs] = await Promise.all([
+    window.launcher.overviewMetrics(7),
     window.launcher.budgetStatus(),
-    window.launcher.modelSpend(),
-    window.launcher.insights(),
-    window.launcher.mcpUsage(),
   ]);
-  const r = res.range;
+  const t = res.range.totals;
+  const forecast = (bs.weekly.spend / 7) * 30;
   const body = $('overview-body');
-  const t = r.totals;
-  const rangeWord = RANGE_LABEL[overviewDays] || `last ${overviewDays} days`;
-  const forecast = (bs.weekly.spend / 7) * 30; // projected monthly at this week's rate
-
   body.innerHTML = `
     <div class="kpis">
-      <div class="kpi"><div class="kpi-val">${fmtDuration(t.activeMs)}</div><div class="kpi-lbl">Time · ${rangeWord}</div></div>
-      <div class="kpi" title="${COST_TIP}"><div class="kpi-val">${fmtCost(t.cost)}</div><div class="kpi-lbl">Cost · ${rangeWord} <span class="est">est.</span></div></div>
+      <div class="kpi"><div class="kpi-val">${fmtDuration(t.activeMs)}</div><div class="kpi-lbl">Time · 7 days</div></div>
+      <div class="kpi" title="${COST_TIP}"><div class="kpi-val">${fmtCost(t.cost)}</div><div class="kpi-lbl">Cost · 7 days <span class="est">est.</span></div></div>
       <div class="kpi"><div class="kpi-val">${fmtNum(t.sessions)}</div><div class="kpi-lbl">Sessions</div></div>
       <div class="kpi"><div class="kpi-val">${fmtNum(t.projects)}</div><div class="kpi-lbl">Projects active</div></div>
     </div>
-    <p class="cost-note">${svg('coin', 12)} Cost is an estimate — recorded tokens × Anthropic's public API prices. Not a bill if you're on a Pro/Max subscription.</p>
-    ${cfg.hasAdminKey ? `<div class="panel" id="billing-panel">
-      <div class="panel-title">Real billed usage <span class="panel-hint">month to date · from Anthropic</span></div>
-      <div id="billing-body"><p class="panel-sub">Fetching billed usage…</p></div>
-    </div>` : ''}
     <div class="panel recap-panel">
       <div class="panel-title">Recap
         <div class="seg recap-range">
@@ -1184,15 +1172,56 @@ async function loadOverview(days) {
       </div>
       <div id="recap-body"><p class="panel-sub">Loading activity…</p></div>
     </div>
-    <div class="detail-grid">
+    <div class="dash-grid">
+      ${cfg.hasAdminKey ? `<div class="panel" id="billing-panel">
+        <div class="panel-title">Real billed usage <span class="panel-hint">month to date</span></div>
+        <div id="billing-body"><p class="panel-sub">Fetching billed usage…</p></div>
+      </div>` : ''}
       <div class="panel">
         <div class="panel-title">Budget &amp; forecast</div>
         ${budgetPanel(bs, forecast)}
       </div>
       <div class="panel">
-        <div class="panel-title">Spend by model <span class="panel-hint">all-time</span></div>
-        ${modelMixBars(ms)}
+        <div class="panel-title">Activity <span class="panel-hint">last 30 days</span></div>
+        ${heatmap(res.heatDays)}
       </div>
+    </div>`;
+
+  const rr = body.querySelector('.recap-refresh');
+  if (rr) rr.addEventListener('click', () => loadRecap(true));
+  body.querySelectorAll('.recap-range button').forEach((b) => b.addEventListener('click', () => {
+    recapRange = b.dataset.range;
+    body.querySelectorAll('.recap-range button').forEach((x) => x.classList.toggle('active', x === b));
+    loadRecap(false);
+  }));
+  loadRecap(false);
+  if (cfg.hasAdminKey) loadBilling();
+}
+
+// Analytics = deep dive (range selector): history, breakdown, model spend,
+// efficiency/trends, top sessions, MCP usage.
+async function loadAnalytics(days) {
+  overviewDays = days || overviewDays || 7;
+  document.querySelectorAll('#rangeToggle button').forEach((b) =>
+    b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
+
+  const [res, ms, ins, mcp] = await Promise.all([
+    window.launcher.overviewMetrics(overviewDays),
+    window.launcher.modelSpend(),
+    window.launcher.insights(),
+    window.launcher.mcpUsage(),
+  ]);
+  const r = res.range;
+  const body = $('analytics-body');
+  const t = r.totals;
+  const rangeWord = RANGE_LABEL[overviewDays] || `last ${overviewDays} days`;
+
+  body.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-val">${fmtDuration(t.activeMs)}</div><div class="kpi-lbl">Time · ${rangeWord}</div></div>
+      <div class="kpi" title="${COST_TIP}"><div class="kpi-val">${fmtCost(t.cost)}</div><div class="kpi-lbl">Cost · ${rangeWord} <span class="est">est.</span></div></div>
+      <div class="kpi"><div class="kpi-val">${fmtNum(t.sessions)}</div><div class="kpi-lbl">Sessions</div></div>
+      <div class="kpi"><div class="kpi-val">${fmtNum(t.turns)}</div><div class="kpi-lbl">Turns</div></div>
     </div>
     <div class="panel">
       <div class="panel-title">History <span class="panel-hint">active time per project · ${rangeWord}</span></div>
@@ -1213,12 +1242,12 @@ async function loadOverview(days) {
         </tbody>
       </table>` : '<p class="panel-sub">No project activity in this range.</p>'}
     </div>
-    ${insightsBlock(ins)}
-    ${mcpBlock(mcp)}
     <div class="panel">
-      <div class="panel-title">Activity — last 30 days</div>
-      ${heatmap(res.heatDays)}
-    </div>`;
+      <div class="panel-title">Spend by model <span class="panel-hint">all-time</span></div>
+      ${modelMixBars(ms)}
+    </div>
+    ${insightsBlock(ins)}
+    ${mcpBlock(mcp)}`;
 
   body.querySelectorAll('tr[data-path]').forEach((row) => {
     row.addEventListener('click', () => {
@@ -1227,18 +1256,8 @@ async function loadOverview(days) {
     });
   });
   body.querySelectorAll('.lead-row[data-session]').forEach((row) => {
-    row.addEventListener('click', () => openTranscript({ cwd: row.dataset.path, sessionId: row.dataset.session }, 'overview'));
+    row.addEventListener('click', () => openTranscript({ cwd: row.dataset.path, sessionId: row.dataset.session }, 'analytics'));
   });
-
-  const rr = body.querySelector('.recap-refresh');
-  if (rr) rr.addEventListener('click', () => loadRecap(true));
-  body.querySelectorAll('.recap-range button').forEach((b) => b.addEventListener('click', () => {
-    recapRange = b.dataset.range;
-    body.querySelectorAll('.recap-range button').forEach((x) => x.classList.toggle('active', x === b));
-    loadRecap(false);
-  }));
-  loadRecap(false);
-  if (cfg.hasAdminKey) loadBilling();
 }
 
 // ---------- compare projects ----------
@@ -1559,7 +1578,8 @@ async function init() {
     else showStatus((r && r.error) || 'Could not resume this session.', 'warn');
   });
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
-    b.addEventListener('click', () => loadOverview(Number(b.dataset.days))));
+    b.addEventListener('click', () => loadAnalytics(Number(b.dataset.days))));
+  $('toAnalytics').addEventListener('click', () => switchView('analytics'));
   $('openMemory').addEventListener('click', () => window.launcher.openMemoryFolder());
 
   // routine editor
@@ -1628,7 +1648,7 @@ async function init() {
     const r = await window.launcher.setAdminKey(val);
     cfg.hasAdminKey = r.hasAdminKey;
     showStatus(r.hasAdminKey ? 'Admin key saved (encrypted).' : 'Admin key cleared.', 'ok');
-    if (!$('view-overview').classList.contains('hidden')) loadOverview(overviewDays);
+    if (!$('view-overview').classList.contains('hidden')) loadOverview();
   });
   $('optAiSummaries').addEventListener('change', async (e) => {
     cfg.aiSummaries = await window.launcher.setAiSummaries(e.target.checked);
@@ -1669,10 +1689,10 @@ async function init() {
     if (scope === 'projects') reconcileProjects();
     else refreshLiveMetrics();
     sampleActiveUsage(); // immediate sample on activity
-    // the Overview is a heavy "report" view — refresh it at most every 25s while open
-    if (!$('view-overview').classList.contains('hidden') && Date.now() - lastOverviewLive > 25000) {
-      lastOverviewLive = Date.now();
-      loadOverview(overviewDays);
+    // Overview/Analytics are heavier report views — refresh the visible one at most every 25s
+    if (Date.now() - lastOverviewLive > 25000) {
+      if (!$('view-overview').classList.contains('hidden')) { lastOverviewLive = Date.now(); loadOverview(); }
+      else if (!$('view-analytics').classList.contains('hidden')) { lastOverviewLive = Date.now(); loadAnalytics(overviewDays); }
     }
   });
 

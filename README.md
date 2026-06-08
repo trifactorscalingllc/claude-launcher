@@ -61,7 +61,8 @@ _The apps aren't code-signed yet, so each OS shows a one-time "unidentified deve
 - **Recap (today / this week)**, **MCP usage** (which servers & tools you lean on), **project notes**, and **side-by-side project compare**.
 - **System tray** — today's time + cost at a glance, plus an active-session indicator. Closing the window keeps it monitoring in the tray.
 - **Desktop notifications** + **cost alerts** — get warned when a session finishes and when you hit 80%/100% of a weekly/monthly **budget**.
-- **Overview** — range selector (1D/7D/1M/3M), per-project history chart, **spend forecast**, **spend-by-model**, 30-day heatmap, and **CSV export**.
+- **Overview** — a glanceable dashboard: this week's time/cost/sessions, the recap, budget & forecast, and a 30-day activity heatmap.
+- **Analytics** — the deep dive (range selector 1D/7D/1M/3M): per-project history chart, projects-by-time, **spend-by-model**, efficiency & trends, top-sessions leaderboard, MCP usage, **Compare**, and **CSV export**.
 
 <div align="center"><img src="docs/feat-overview.png" width="820" alt="Overview — budgets, forecast, spend by model, history" /></div>
 

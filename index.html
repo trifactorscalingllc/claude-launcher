@@ -29,7 +29,10 @@
           <span class="ico" data-ico="search"></span> Search
         </button>
         <button class="nav-item" data-view="overview">
-          <span class="ico" data-ico="chart"></span> Overview
+          <span class="ico" data-ico="gauge"></span> Overview
+        </button>
+        <button class="nav-item" data-view="analytics">
+          <span class="ico" data-ico="chart"></span> Analytics
         </button>
         <button class="nav-item" data-view="context">
           <span class="ico" data-ico="brain"></span> Context
@@ -260,10 +263,22 @@
         </div>
       </section>
 
-      <!-- Overview view -->
+      <!-- Overview view (glanceable dashboard) -->
       <section id="view-overview" class="view hidden">
         <header class="topbar">
           <h2 class="view-title">Overview</h2>
+          <span class="topbar-sub">last 7 days</span>
+          <button id="toAnalytics" class="btn ghost" style="margin-left:auto"><span class="ico" data-ico="chart"></span> Full analytics</button>
+        </header>
+        <div class="scroll">
+          <div id="overview-body"></div>
+        </div>
+      </section>
+
+      <!-- Analytics view (deep dive) -->
+      <section id="view-analytics" class="view hidden">
+        <header class="topbar">
+          <h2 class="view-title">Analytics</h2>
           <div class="range-toggle" id="rangeToggle">
             <button data-days="1">1 Day</button>
             <button data-days="7" class="active">7 Days</button>
@@ -274,7 +289,7 @@
           <button id="exportCsv" class="btn ghost"><span class="ico" data-ico="download"></span> Export</button>
         </header>
         <div class="scroll">
-          <div id="overview-body"></div>
+          <div id="analytics-body"></div>
         </div>
       </section>
 
