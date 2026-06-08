@@ -448,28 +448,59 @@ class Indexer {
     return out;
   }
 
-  // The single most-recently-active session (for the live "Active now" panel),
-  // or null if nothing has been touched within `withinMs`.
-  activeSession(withinMs = 150000) {
+  // The active session for the live "Active now" panel, or null if nothing has been
+  // touched within `withinMs`. STICKY: if `preferId` is still active, keep returning
+  // it (so the panel doesn't flip between two concurrently-active sessions); only
+  // fall back to the most-recent when the preferred one goes idle.
+  activeSession(withinMs = 150000, preferId = null) {
     const now = Date.now();
-    let best = null;
+    let best = null, preferred = null;
     for (const cwd in this.store.projects) {
       const p = this.store.projects[cwd];
       for (const id in p.sessions) {
         const s = p.sessions[id];
         if (!s.lastTs || now - s.lastTs >= withinMs) continue;
-        if (!best || s.lastTs > best.lastTs) {
-          const tok = s.tokens || { in: 0, out: 0, cw: 0, cr: 0 };
-          best = {
-            path: cwd, name: cwd.split(/[\\/]/).pop() || cwd, sessionId: id,
-            firstTs: s.firstTs, lastTs: s.lastTs, activeMs: s.activeMs, turns: s.turns,
-            cost: s.cost, tokens: tok.in + tok.out + tok.cw + tok.cr,
-            model: Object.keys(s.models || {}).sort((a, b) => s.models[b] - s.models[a])[0] || '',
-          };
-        }
+        const tok = s.tokens || { in: 0, out: 0, cw: 0, cr: 0 };
+        const info = {
+          path: cwd, name: cwd.split(/[\\/]/).pop() || cwd, sessionId: id,
+          firstTs: s.firstTs, lastTs: s.lastTs, activeMs: s.activeMs, turns: s.turns,
+          cost: s.cost,
+          tokens: tok.in + tok.out + tok.cw + tok.cr,
+          tokensIn: tok.in, tokensOut: tok.out, tokensCache: tok.cw + tok.cr,
+          model: Object.keys(s.models || {}).sort((a, b) => s.models[b] - s.models[a])[0] || '',
+          models: Object.keys(s.models || {}),
+        };
+        if (preferId && id === preferId) preferred = info;
+        if (!best || s.lastTs > best.lastTs) best = info;
       }
     }
-    return best;
+    return preferred || best;
+  }
+
+  // ALL sessions active within `withinMs` (most recent first) — one per live
+  // Claude session, so the UI can show a card for each.
+  activeSessions(withinMs = 150000) {
+    const now = Date.now();
+    const out = [];
+    for (const cwd in this.store.projects) {
+      const p = this.store.projects[cwd];
+      for (const id in p.sessions) {
+        const s = p.sessions[id];
+        if (!s.lastTs || now - s.lastTs >= withinMs) continue;
+        const tok = s.tokens || { in: 0, out: 0, cw: 0, cr: 0 };
+        out.push({
+          path: cwd, name: cwd.split(/[\\/]/).pop() || cwd, sessionId: id,
+          firstTs: s.firstTs, lastTs: s.lastTs, activeMs: s.activeMs, turns: s.turns,
+          cost: s.cost,
+          tokens: tok.in + tok.out + tok.cw + tok.cr,
+          tokensIn: tok.in, tokensOut: tok.out, tokensCache: tok.cw + tok.cr,
+          model: Object.keys(s.models || {}).sort((a, b) => s.models[b] - s.models[a])[0] || '',
+          models: Object.keys(s.models || {}),
+        });
+      }
+    }
+    out.sort((a, b) => b.lastTs - a.lastTs);
+    return out;
   }
 
   // Deeper analytics for the Overview: efficiency, week-over-week trend,

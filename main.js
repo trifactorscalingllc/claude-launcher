@@ -963,8 +963,11 @@ ipcMain.handle('project-detail', (_e, projectPath) => {
   };
 });
 
-ipcMain.handle('active-session', () => {
-  try { return indexer.activeSession(); } catch { return null; }
+ipcMain.handle('active-session', (_e, preferId) => {
+  try { return indexer.activeSession(150000, preferId || null); } catch { return null; }
+});
+ipcMain.handle('active-sessions', () => {
+  try { return indexer.activeSessions(150000); } catch { return []; }
 });
 
 ipcMain.handle('insights', () => {
@@ -1253,19 +1256,40 @@ ipcMain.handle('search-transcripts', async (_e, query, filters) => {
 // ---- project summary (offline heuristic: README/CLAUDE.md + git + latest session title) ----
 const summaryCache = new Map();
 
+// First real prose line of a README/CLAUDE.md — skips YAML frontmatter, HTML
+// (e.g. `<div align="center">`, `<img …>`), HTML comments, badges, and headings,
+// and strips inline markup. Falls back to the first heading text only if there's
+// no prose, so a card description is always clean readable text — never raw markup.
 function firstParagraph(text) {
-  const lines = text.split(/\r?\n/);
+  let lines = text.split(/\r?\n/);
+  if (lines[0] && lines[0].trim() === '---') {
+    const end = lines.indexOf('---', 1);
+    if (end > 0) lines = lines.slice(end + 1);
+  }
+  let inComment = false, headingFallback = '';
   for (const raw of lines) {
     let l = raw.trim();
     if (!l) continue;
-    if (/^[#>*\-=`|!\[]/.test(l)) {
+    if (inComment) { if (l.includes('-->')) inComment = false; continue; }
+    if (l.startsWith('<!--')) { if (!l.includes('-->')) inComment = true; continue; }
+    if (/^<\/?[a-z!]/i.test(l)) continue; // a line that is just HTML markup
+    const isHeading = /^#{1,6}\s/.test(l);
+    if (/^[#>*\-=`|]/.test(l)) {
       l = l.replace(/^#+\s*/, '').replace(/^[>*\-]\s*/, '').trim();
-      if (!l || /^=+$/.test(l) || /^-+$/.test(l)) continue;
+      if (!l || /^[=\-]+$/.test(l)) continue;
     }
-    l = l.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`]/g, '');
-    if (l.length > 8) return l.length > 160 ? l.slice(0, 157) + '…' : l;
+    l = l.replace(/<[^>]+>/g, '')                 // inline HTML tags
+         .replace(/!\[[^\]]*\]\([^)]*\)/g, '')    // images / badges
+         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → their text
+         .replace(/[*_`]/g, '')
+         .trim();
+    if (l.length > 8 && /[a-zA-Z]{3,}/.test(l)) {
+      const clipped = l.length > 160 ? l.slice(0, 157) + '…' : l;
+      if (isHeading) { if (!headingFallback) headingFallback = clipped; continue; }
+      return clipped; // prefer real prose over the title
+    }
   }
-  return '';
+  return headingFallback;
 }
 
 ipcMain.handle('project-summary', async (_e, projectPath) => {

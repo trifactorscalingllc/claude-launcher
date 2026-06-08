@@ -453,13 +453,13 @@ async function loadProjects() {
 // place, no DOM rebuild, no placeholder flash, no layout shift. Inactive projects
 // are left completely untouched (their data can't change while you're not in them).
 async function refreshLiveMetrics() {
-  const a = await window.launcher.activeSession();
-  const activePath = a ? a.path : null;
+  const list = await window.launcher.activeSessions();
+  const activePaths = new Set((list || []).map((a) => a.path));
   // a session started in a folder that has no card yet → add it (rare, one-time)
-  if (activePath && !cardEls.has(activePath)) { await reconcileProjects(); return; }
+  for (const ap of activePaths) { if (!cardEls.has(ap)) { await reconcileProjects(); return; } }
   for (const [path, el] of cardEls) {
     if (!el.isConnected) continue;
-    if (path === activePath || el.classList.contains('is-active')) {
+    if (activePaths.has(path) || el.classList.contains('is-active')) {
       const p = projects.find((x) => x.path === path) || externalProjects.find((x) => x.path === path);
       if (p) loadMetrics(el, p); // updates time/cost/sparkline/active-dot/sessions in place
     }
@@ -1583,10 +1583,11 @@ async function init() {
   setInterval(() => { refreshLiveMetrics(); refreshActivePanel(); }, 15000);
 }
 
-// ---------- live "Active now" panel ----------
-let activeData = null;
+// ---------- live "Active now" panels (one card per running session) ----------
 let activeTimer = null;
-let activeRenderedId = null; // which session the panel DOM currently shows
+const activeCards = new Map();    // sessionId -> card element
+const sessionSamples = new Map(); // sessionId -> [{t, tokens, cost}]
+const sessionModels = new Map();  // sessionId -> Set(model)
 
 function modelShort(m) {
   if (!m) return '';
@@ -1600,55 +1601,109 @@ function fmtClock(ms) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
   return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
 }
+function recordSample(a) {
+  let arr = sessionSamples.get(a.sessionId);
+  if (!arr) { arr = []; sessionSamples.set(a.sessionId, arr); }
+  const last = arr[arr.length - 1];
+  if (!(last && last.tokens === a.tokens && last.cost === a.cost)) {
+    arr.push({ t: Date.now(), tokens: a.tokens, cost: a.cost });
+    if (arr.length > 240) arr.shift();
+  }
+  let ms = sessionModels.get(a.sessionId);
+  if (!ms) { ms = new Set(); sessionModels.set(a.sessionId, ms); }
+  (a.models || []).forEach((m) => ms.add(m));
+}
+function modelChips(id) {
+  return [...(sessionModels.get(id) || [])].map((m) => `<span class="ap-model">${escapeHtml(modelShort(m))}</span>`).join('');
+}
+// Live multi-line graph: x = time; tokens (clay) and cost (green) each scaled to
+// their own range so both trends show. They diverge when the model mix changes
+// (cost-per-token differs by model) — the interesting signal.
+function sessionGraphSvg(samples) {
+  if (!samples || samples.length < 2) return '<div class="ap-graph-empty">Building live graph — keep working and the lines fill in…</div>';
+  const W = 600, H = 130, pad = 12;
+  const t0 = samples[0].t, t1 = samples[samples.length - 1].t;
+  const span = Math.max(1, t1 - t0);
+  const X = (t) => pad + ((t - t0) / span) * (W - 2 * pad);
+  const lineFor = (key, color) => {
+    const vals = samples.map((s) => s[key]);
+    const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx - mn) || 1;
+    const Y = (v) => pad + (1 - (v - mn) / rng) * (H - 2 * pad);
+    const pts = samples.map((s) => `${X(s.t).toFixed(1)},${Y(s[key]).toFixed(1)}`).join(' ');
+    const lx = X(samples[samples.length - 1].t).toFixed(1), ly = Y(vals[vals.length - 1]).toFixed(1);
+    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx}" cy="${ly}" r="3.2" fill="${color}"/>`;
+  };
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="ap-graph-svg">
+    <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" class="ap-grid"/>
+    ${lineFor('tokens', '#d97757')}
+    ${lineFor('cost', '#4f7d5b')}
+  </svg>`;
+}
+
 async function refreshActivePanel() {
   const panel = $('activePanel');
   if (!panel) return;
-  const a = await window.launcher.activeSession();
-  activeData = a;
-  if (!a) {
+  const list = await window.launcher.activeSessions();
+  if (!list || !list.length) {
     panel.classList.add('hidden'); panel.innerHTML = '';
-    activeRenderedId = null;
+    activeCards.clear(); sessionSamples.clear(); sessionModels.clear();
     if (activeTimer) { clearInterval(activeTimer); activeTimer = null; }
     return;
   }
   panel.classList.remove('hidden');
-  if (a.sessionId !== activeRenderedId) {
-    drawActivePanel();                 // new/changed session → full draw (rebinds buttons)
-    activeRenderedId = a.sessionId;
-  } else {
-    updateActivePanelStats();          // same session → update numbers in place (no flicker)
+  const ids = new Set(list.map((a) => a.sessionId));
+  for (const [id, el] of activeCards) { // drop sessions that went idle
+    if (!ids.has(id)) { el.remove(); activeCards.delete(id); sessionSamples.delete(id); sessionModels.delete(id); }
   }
-  if (!activeTimer) activeTimer = setInterval(tickActivePanel, 1000);
+  list.forEach((a) => {
+    recordSample(a);
+    if (activeCards.has(a.sessionId)) updateActiveCard(a);
+    else { const el = buildActiveCard(a); activeCards.set(a.sessionId, el); panel.appendChild(el); }
+  });
+  panel.classList.toggle('multi', list.length > 1);
+  if (!activeTimer) activeTimer = setInterval(tickActivePanels, 1000);
 }
-function updateActivePanelStats() {
-  const a = activeData; if (!a) return;
-  const panel = $('activePanel');
-  const tok = panel.querySelector('.ap-tokens'); if (tok) tok.textContent = `${fmtNum(a.tokens)} tokens`;
-  const cost = panel.querySelector('.ap-cost'); if (cost) cost.innerHTML = `${fmtCost(a.cost)} <span class="est">est.</span>`;
-}
-function drawActivePanel() {
-  const a = activeData;
-  if (!a) return;
+function buildActiveCard(a) {
+  const el = document.createElement('div');
+  el.className = 'active-card';
+  el.dataset.session = a.sessionId;
   const first = a.firstTs || a.lastTs;
-  $('activePanel').innerHTML = `
-    <div class="ap-head"><span class="ap-dot"></span> ACTIVE NOW${a.model ? `<span class="ap-model">${escapeHtml(modelShort(a.model))}</span>` : ''}</div>
+  el.innerHTML = `
+    <div class="ap-head"><span class="ap-dot"></span> ACTIVE NOW <span class="ap-models">${modelChips(a.sessionId)}</span></div>
     <div class="ap-name">${escapeHtml(a.name)}</div>
     <div class="ap-stats">
       <span class="ap-clock" data-first="${first}" title="How long this session has been running">${fmtClock(Date.now() - first)}</span>
       <span class="ap-tokens">${fmtNum(a.tokens)} tokens</span>
       <span class="ap-cost" title="${COST_TIP}">${fmtCost(a.cost)} <span class="est">est.</span></span>
     </div>
+    <div class="ap-graph"><div class="ap-graph-inner">${sessionGraphSvg(sessionSamples.get(a.sessionId))}</div></div>
+    <div class="ap-legend">
+      <span class="ap-leg"><span class="ap-sw" style="background:#d97757"></span>tokens <b class="ap-leg-tok">${fmtNum(a.tokens)}</b></span>
+      <span class="ap-leg"><span class="ap-sw" style="background:#4f7d5b"></span>cost <b class="ap-leg-cost">${fmtCost(a.cost)}</b> <span class="est">est.</span></span>
+      <span class="ap-leg-x">live · over session time</span>
+    </div>
     <div class="ap-actions">
       <button class="btn primary ap-open">${svg('terminal', 15)} Open</button>
       <button class="btn ghost ap-view">${svg('message', 15)} View session</button>
     </div>`;
-  $('activePanel').querySelector('.ap-open').addEventListener('click', async () => { const r = await window.launcher.openProject(a.path); handleLaunchResult(r, a.name); });
-  $('activePanel').querySelector('.ap-view').addEventListener('click', () => openTranscript({ cwd: a.path, sessionId: a.sessionId }, 'projects'));
+  el.querySelector('.ap-open').addEventListener('click', async () => { const r = await window.launcher.openProject(a.path); handleLaunchResult(r, a.name); });
+  el.querySelector('.ap-view').addEventListener('click', () => openTranscript({ cwd: a.path, sessionId: a.sessionId }, 'projects'));
+  return el;
 }
-function tickActivePanel() {
-  const clk = document.querySelector('#activePanel .ap-clock');
-  if (!clk) return;
-  clk.textContent = fmtClock(Date.now() - Number(clk.dataset.first));
+function updateActiveCard(a) {
+  const el = activeCards.get(a.sessionId); if (!el) return;
+  const set = (sel, html) => { const n = el.querySelector(sel); if (n) n.innerHTML = html; };
+  set('.ap-tokens', `${fmtNum(a.tokens)} tokens`);
+  set('.ap-cost', `${fmtCost(a.cost)} <span class="est">est.</span>`);
+  set('.ap-models', modelChips(a.sessionId));
+  set('.ap-leg-tok', fmtNum(a.tokens));
+  set('.ap-leg-cost', fmtCost(a.cost));
+  const g = el.querySelector('.ap-graph-inner'); if (g) g.innerHTML = sessionGraphSvg(sessionSamples.get(a.sessionId));
+}
+function tickActivePanels() {
+  document.querySelectorAll('#activePanel .ap-clock').forEach((clk) => {
+    clk.textContent = fmtClock(Date.now() - Number(clk.dataset.first));
+  });
 }
 
 init();
