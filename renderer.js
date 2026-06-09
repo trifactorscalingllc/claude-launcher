@@ -2168,11 +2168,20 @@ async function sampleActiveUsage() {
   const list = await window.launcher.activeSessions();
   if (!list || !list.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.classList.remove('hidden');
-  const lead = list.slice().sort((a, b) => b.activeMs - a.activeMs)[0];
+  // prefer a session that's waiting on you as the lead; else the most active
+  const lead = list.slice().sort((a, b) => (b.awaiting - a.awaiting) || (b.activeMs - a.activeMs))[0];
   const others = list.length - 1;
+  const awaiting = !!lead.awaiting;
+  el.classList.toggle('awaiting', awaiting);
+  const ctxPct = lead.contextTokens ? Math.min(100, Math.round(lead.contextTokens / 200000 * 100)) : 0;
+  const ctxHigh = ctxPct >= 85;
+  const statusTxt = awaiting ? '<span class="amb-wait">waiting for you</span>' : `${fmtDuration(lead.activeMs)} active`;
+  const ctxHtml = ctxPct
+    ? ` · <span class="amb-ctx${ctxHigh ? ' high' : ''}" title="~${fmtTokens(lead.contextTokens)} of ~200K context window in use this session${ctxHigh ? ' — consider /compact' : ''}"><span class="amb-ctx-bar"><span style="width:${ctxPct}%"></span></span>ctx ${ctxPct}%</span>`
+    : '';
   el.innerHTML = `
     <span class="amb-dot"></span>
-    <span class="amb-text"><strong>${list.length} session${list.length === 1 ? '' : 's'} live</strong> · <span class="amb-name">${escapeHtml(lead.name)}</span> · ${fmtDuration(lead.activeMs)} active${others > 0 ? ` · +${others} more` : ''}</span>
+    <span class="amb-text"><strong>${list.length} session${list.length === 1 ? '' : 's'} live</strong> · <span class="amb-name">${escapeHtml(lead.name)}</span> · ${statusTxt}${ctxHtml}${others > 0 ? ` · +${others} more` : ''}</span>
     <button class="btn ghost btn-xs amb-open">${svg('terminal', 13)} Open</button>
     <button class="btn ghost btn-xs amb-view">${svg('message', 13)} View</button>`;
   el.querySelector('.amb-open').addEventListener('click', () => openRow(lead));
