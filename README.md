@@ -31,11 +31,22 @@ way to jump back in.** It runs entirely on your machine, and it auto-updates its
 | Platform | File | First-run note |
 |---|---|---|
 | **Windows** | `Claude-Helm-Setup-*.exe` | SmartScreen → **More info → Run anyway**. Then it **updates itself silently.** |
-| **macOS (Apple Silicon)** | `Claude-Helm-*-arm64.dmg` | Right-click the app → **Open** (unsigned, so Gatekeeper warns once). |
+| **macOS (Apple Silicon)** | `Claude-Helm-*-arm64.dmg` | Drag to **Applications**, then run the one-line unblock below — macOS marks unsigned downloads as "damaged." |
 | **macOS (Intel)** | `Claude-Helm-*-x64.dmg` | Same as above. |
 | **Linux** | `Claude-Helm-*.AppImage` | `chmod +x` then run. |
 
-_The apps aren't code-signed yet, so each OS shows a one-time "unidentified developer" prompt. Windows auto-updates in place; macOS/Linux re-download to update until signed._
+### macOS first run — "Claude Helm is damaged and can't be opened"
+
+This is **not** corruption. The app isn't code-signed yet, so when your browser downloads it macOS attaches a quarantine flag and — on Apple Silicon especially — refuses to launch it. Right-click → Open does **not** clear this; you need to strip the quarantine flag once:
+
+1. Open the `.dmg` and drag **Claude Helm** into **Applications**.
+2. In **Terminal**, run:
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Claude Helm.app"
+   ```
+3. Open Claude Helm normally. You only do this once per install.
+
+_The apps aren't code-signed yet, so each OS shows a one-time security prompt. Windows auto-updates in place; macOS/Linux re-download to update until signed._
 
 ---
 

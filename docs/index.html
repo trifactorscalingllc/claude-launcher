@@ -200,7 +200,8 @@
       </div>
       <div class="dl-card">
         <h4>macOS</h4>
-        <p>Apple Silicon and Intel <code>.dmg</code> builds. Right-click the app → <strong>Open</strong> the first time.</p>
+        <p>Apple Silicon and Intel <code>.dmg</code> builds. Drag to <strong>Applications</strong>, then clear the quarantine flag once (unsigned downloads show "damaged"):</p>
+        <p><code>xattr -dr com.apple.quarantine "/Applications/Claude Helm.app"</code></p>
         <a href="https://github.com/trifactorscalingllc/claude-helm/releases/latest">Download .dmg →</a>
       </div>
       <div class="dl-card">
