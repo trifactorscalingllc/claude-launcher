@@ -1867,13 +1867,7 @@ async function init() {
   if (!cfg.onboarded) showOnboarding();
   else { detectClaudeBanner(); loadAwayDigest(); }
 
-  $('themeToggle').addEventListener('click', async () => {
-    const next = (cfg.theme === 'dark') ? 'light' : 'dark';
-    cfg.theme = await window.launcher.setTheme(next);
-    applyTheme(cfg.theme);
-  });
-
-  // accent pickers — sidebar swatches + Settings → Personalize chips
+  // accent pickers — Settings → Personalize chips (theme/accent moved out of the sidebar)
   document.querySelectorAll('#accentPicker .accent-sw, #setAccentPicker .accent-chip').forEach((sw) =>
     sw.addEventListener('click', async () => {
       cfg.accent = await window.launcher.setAccent(sw.dataset.accent);
