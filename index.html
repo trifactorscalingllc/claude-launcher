@@ -10,6 +10,14 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Update-ready banner (unmissable; pinned to the top of the window) -->
+  <div id="updateBanner" class="update-banner hidden">
+    <span class="ico" data-ico="bolt"></span>
+    <span id="updateBannerMsg" class="ub-msg">A new version is ready.</span>
+    <button id="updateBannerInstall" class="btn primary ub-btn">Restart &amp; update</button>
+    <button id="updateBannerLater" class="ub-x" title="Dismiss (apply on next quit)" aria-label="Dismiss">×</button>
+  </div>
+
   <div class="app">
     <!-- Sidebar -->
     <aside class="sidebar">

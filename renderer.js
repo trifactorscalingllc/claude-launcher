@@ -1840,7 +1840,20 @@ async function init() {
   const umsg = $('updateMsg');
   const uinstall = $('updateInstall');
   const ustate = $('updateState');      // Settings → About panel
+  const ubanner = $('updateBanner');    // unmissable top-of-window bar
+  const ubMsg = $('updateBannerMsg');
+  function showUpdateBanner(version) {
+    if (ubMsg) ubMsg.textContent = `Claude Helm v${version} is ready — restart to finish updating.`;
+    if (ubanner) ubanner.classList.remove('hidden');
+    document.body.classList.add('has-update-banner');
+  }
+  function hideUpdateBanner() {
+    if (ubanner) ubanner.classList.add('hidden');
+    document.body.classList.remove('has-update-banner');
+  }
   uinstall.addEventListener('click', () => window.launcher.installUpdate());
+  if ($('updateBannerInstall')) $('updateBannerInstall').addEventListener('click', () => window.launcher.installUpdate());
+  if ($('updateBannerLater')) $('updateBannerLater').addEventListener('click', hideUpdateBanner);
   window.launcher.appVersion().then((v) => { $('aboutVer').innerHTML = `Claude Helm v${displayVersion(v)} <span class="beta-tag">beta</span>`; });
   $('repoLink').addEventListener('click', (e) => { e.preventDefault(); window.launcher.openExternal('https://github.com/trifactorscalingllc/claude-helm'); });
   let checkedManually = false;
@@ -1853,8 +1866,8 @@ async function init() {
     if (state === 'checking') { if (checkedManually && ustate) ustate.textContent = 'Checking for updates…'; }
     else if (state === 'available') { umsg.textContent = `Downloading update v${info.version}…`; toast.classList.remove('hidden'); uinstall.classList.add('hidden'); if (ustate) ustate.textContent = `Update v${info.version} found — downloading…`; }
     else if (state === 'downloading') { umsg.textContent = `Downloading update… ${info.percent}%`; toast.classList.remove('hidden'); if (ustate) ustate.textContent = `Downloading update… ${info.percent}%`; }
-    else if (state === 'ready') { umsg.textContent = `Update v${info.version} ready.`; toast.classList.remove('hidden'); uinstall.classList.remove('hidden'); if (ustate) ustate.textContent = `Update v${info.version} ready — restart to apply.`; }
-    else if (state === 'current') { if (checkedManually && ustate) ustate.textContent = "You're on the latest version."; checkedManually = false; }
+    else if (state === 'ready') { toast.classList.add('hidden'); showUpdateBanner(info.version); if (ustate) ustate.textContent = `Update v${info.version} ready — restart to apply.`; }
+    else if (state === 'current') { hideUpdateBanner(); if (checkedManually && ustate) ustate.textContent = "You're on the latest version."; checkedManually = false; }
     else if (state === 'error') { toast.classList.add('hidden'); if (checkedManually && ustate) ustate.textContent = "Couldn't check right now — try again shortly."; checkedManually = false; }
   });
 
