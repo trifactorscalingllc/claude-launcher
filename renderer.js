@@ -1585,6 +1585,9 @@ function applyTheme(theme) {
     if (ico) ico.innerHTML = svg(theme === 'dark' ? 'sun' : 'moon');
     if (lbl) lbl.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
   }
+  // Settings → Personalize theme segmented control
+  document.querySelectorAll('#setThemeSeg button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.theme === theme));
 }
 
 const ACCENTS = ['clay', 'lagoon', 'aubergine', 'jade'];
@@ -1593,7 +1596,8 @@ function applyAccent(accent) {
   // 'clay' is the default :root palette — no attribute needed.
   if (a === 'clay') document.documentElement.removeAttribute('data-accent');
   else document.documentElement.setAttribute('data-accent', a);
-  document.querySelectorAll('#accentPicker .accent-sw').forEach((b) => {
+  // sidebar swatches + Settings → Personalize chips both reflect the choice
+  document.querySelectorAll('.accent-sw, .accent-chip').forEach((b) => {
     b.classList.toggle('sel', b.dataset.accent === a);
   });
 }
@@ -1713,10 +1717,27 @@ async function init() {
     applyTheme(cfg.theme);
   });
 
-  document.querySelectorAll('#accentPicker .accent-sw').forEach((sw) =>
+  // accent pickers — sidebar swatches + Settings → Personalize chips
+  document.querySelectorAll('#accentPicker .accent-sw, #setAccentPicker .accent-chip').forEach((sw) =>
     sw.addEventListener('click', async () => {
       cfg.accent = await window.launcher.setAccent(sw.dataset.accent);
       applyAccent(cfg.accent);
+    }));
+
+  // Settings → Personalize theme segmented control
+  document.querySelectorAll('#setThemeSeg button').forEach((b) =>
+    b.addEventListener('click', async () => {
+      cfg.theme = await window.launcher.setTheme(b.dataset.theme);
+      applyTheme(cfg.theme);
+    }));
+
+  // Settings subtabs (General / Personalize / AI & Usage / About)
+  document.querySelectorAll('#settingsTabs button').forEach((tab) =>
+    tab.addEventListener('click', () => {
+      const pane = tab.dataset.pane;
+      document.querySelectorAll('#settingsTabs button').forEach((t) => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('#view-settings .settings-pane').forEach((p) =>
+        p.classList.toggle('hidden', p.dataset.pane !== pane));
     }));
 
   document.querySelectorAll('.nav-item').forEach((n) =>

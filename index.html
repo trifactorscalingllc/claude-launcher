@@ -102,8 +102,16 @@
       <section id="view-settings" class="view hidden">
         <header class="topbar">
           <h2 class="view-title">Settings</h2>
+          <div class="seg settings-tabs" id="settingsTabs">
+            <button data-pane="general" class="active">General</button>
+            <button data-pane="personalize">Personalize</button>
+            <button data-pane="usage">AI &amp; Usage</button>
+            <button data-pane="about">About</button>
+          </div>
         </header>
         <div class="scroll">
+          <!-- ===== General ===== -->
+          <div class="settings-pane" data-pane="general">
           <div class="panel">
             <div class="panel-title">Projects folder</div>
             <p class="panel-sub">The folder scanned for projects. Each subfolder is one project.</p>
@@ -167,6 +175,67 @@
           </div>
 
           <div class="panel">
+            <div class="panel-title">Startup</div>
+            <p class="panel-sub">Keep Claude Helm running in the background so it always has fresh stats and tray alerts.</p>
+            <label class="toggle">
+              <input type="checkbox" id="optOpenAtLogin" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Launch at login</strong>
+                <em>Open Claude Helm automatically when you sign in to your computer.</em>
+              </span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="optStartHidden" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Start minimized to tray</strong>
+                <em>When launched at login, start in the system tray instead of opening the window.</em>
+              </span>
+            </label>
+          </div>
+          </div><!-- /general -->
+
+          <!-- ===== Personalize ===== -->
+          <div class="settings-pane hidden" data-pane="personalize">
+          <div class="panel">
+            <div class="panel-title">Appearance</div>
+            <p class="panel-sub">Make Claude Helm yours. Pick light or dark, then an accent — it recolors buttons, highlights, the active nav, and charts across the whole app. Also lives in the sidebar.</p>
+            <div class="field">
+              <span>Theme</span>
+              <div class="seg" id="setThemeSeg">
+                <button data-theme="light">Light</button>
+                <button data-theme="dark">Dark</button>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <span>Accent color</span>
+              <div class="accent-grid" id="setAccentPicker">
+                <button class="accent-chip" data-accent="clay"><span class="accent-dot"></span>Clay</button>
+                <button class="accent-chip" data-accent="lagoon"><span class="accent-dot"></span>Lagoon</button>
+                <button class="accent-chip" data-accent="aubergine"><span class="accent-dot"></span>Aubergine</button>
+                <button class="accent-chip" data-accent="jade"><span class="accent-dot"></span>Jade</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Privacy</div>
+            <p class="panel-sub">For screenshots and screen-sharing — keeps your work off the screen without closing the app.</p>
+            <label class="toggle">
+              <input type="checkbox" id="optRedact" />
+              <span class="track"></span>
+              <span class="toggle-text">
+                <strong>Blur descriptions (privacy / screenshots)</strong>
+                <em>Blurs project descriptions, summaries, search snippets, and memory text — for screenshots or screen-sharing. Toggle anytime with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>.</em>
+              </span>
+            </label>
+          </div>
+          </div><!-- /personalize -->
+
+          <!-- ===== AI & Usage ===== -->
+          <div class="settings-pane hidden" data-pane="usage">
+          <div class="panel">
             <div class="panel-title">AI project summaries</div>
             <p class="panel-sub">Generate a one-line "what this is + where it stands" per project with Claude (<code>claude-opus-4-8</code>). Summaries are cached and only regenerate when the project changes. Your key is <strong>encrypted with your OS keychain</strong> — never stored in plaintext.</p>
 
@@ -214,38 +283,11 @@
                 <em>When a session finishes and when you approach/exceed a budget. Also powers the system-tray summary.</em>
               </span>
             </label>
-
-            <label class="toggle">
-              <input type="checkbox" id="optRedact" />
-              <span class="track"></span>
-              <span class="toggle-text">
-                <strong>Blur descriptions (privacy / screenshots)</strong>
-                <em>Blurs project descriptions, summaries, search snippets, and memory text — for screenshots or screen-sharing. Toggle anytime with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>.</em>
-              </span>
-            </label>
           </div>
+          </div><!-- /usage -->
 
-          <div class="panel">
-            <div class="panel-title">Startup</div>
-            <p class="panel-sub">Keep Claude Helm running in the background so it always has fresh stats and tray alerts.</p>
-            <label class="toggle">
-              <input type="checkbox" id="optOpenAtLogin" />
-              <span class="track"></span>
-              <span class="toggle-text">
-                <strong>Launch at login</strong>
-                <em>Open Claude Helm automatically when you sign in to your computer.</em>
-              </span>
-            </label>
-            <label class="toggle">
-              <input type="checkbox" id="optStartHidden" />
-              <span class="track"></span>
-              <span class="toggle-text">
-                <strong>Start minimized to tray</strong>
-                <em>When launched at login, start in the system tray instead of opening the window.</em>
-              </span>
-            </label>
-          </div>
-
+          <!-- ===== About ===== -->
+          <div class="settings-pane hidden" data-pane="about">
           <div class="panel">
             <div class="panel-title">About &amp; updates</div>
             <p class="panel-sub">Claude Helm runs <strong>100% locally</strong>. It reads your Claude Code history on this machine to build the dashboard — no account, no telemetry, nothing leaves your computer. The only optional network call is AI summaries, if you add your own API key above.</p>
@@ -256,6 +298,7 @@
             <div id="updateState" class="panel-sub" style="margin-top:8px"></div>
             <p class="panel-sub" style="margin-top:12px">MIT licensed · <a id="repoLink" href="#" class="link-inline">github.com/trifactorscalingllc/claude-helm</a></p>
           </div>
+          </div><!-- /about -->
         </div>
       </section>
 
