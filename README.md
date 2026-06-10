@@ -53,7 +53,8 @@ Update behavior while unsigned: **Windows auto-updates silently in place.** macO
 
 ### 🚀 Launch anything
 - **Open in Claude** — a terminal already in the project, running `claude`. Cross-platform: Windows Terminal, macOS Terminal/iTerm, every common Linux terminal. Per-launch model overrides (Opus / Sonnet / Haiku).
-- **Launch the app or website inside any project** — anything with an `index.html` (served by a built-in local server) or a `dev`/`start`/`serve` script (spawned with automatic localhost-URL capture) gets a Launch button. Detection walks the whole project tree. Opens in an in-app preview window with reload + browser pop-out.
+- **Launch the app or website inside any project** — anything with an `index.html` (served by a built-in local server) or a `dev`/`start`/`serve` script (spawned with automatic localhost-URL capture) gets a Launch button. Detection walks the whole project tree. Opens in an in-app preview window with reload + an accent-tinted browser pop-out.
+- **Launchable files at a glance** — projects you've touched in the last 48 hours show an open-by-default subtree listing *every* launchable file and dev script inside them, each with its own Launch button. Launching a different file while one runs swaps the preview over to it.
 - **Share a running preview with a client** — one click opens a Cloudflare quick tunnel: a public https link + QR code they can open on a phone. The link dies when you stop the preview.
 - **Quick tasks** — dispatch a headless `claude -p` task into any project from its card ("fix the mobile nav overlap"). A tasks strip tracks progress; desktop ping on completion.
 - **Resume or branch any past session**, create projects from the app, open in editor or file explorer.
