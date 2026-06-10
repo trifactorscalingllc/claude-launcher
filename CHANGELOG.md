@@ -3,6 +3,12 @@
 All notable changes to Claude Helm are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `package.json` semver.
 
+## [1.17.1] - 2026-06-10
+
+### Changed
+- Launchable files now show their real names — an HTML page's `<title>` (or its file name when untitled) and a dev app's package name — with the path or run command as smaller secondary text.
+- The launchable-files subtree starts collapsed; click the header to open it.
+
 ## [1.17.0] - 2026-06-10
 
 ### Added

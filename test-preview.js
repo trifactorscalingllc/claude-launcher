@@ -100,9 +100,9 @@ async function testNotLaunchable() {
 async function testDetectAllInventory() {
   console.log('\n[6] detectAll: inventory, skip-dirs, depth cap, BFS order');
   const proj = path.join(tmp, 'p6');
-  mk('p6/index.html', '<h1>root</h1>');
+  mk('p6/index.html', '<html><head><title>  My Root\n Site </title></head><h1>root</h1></html>');
   mk('p6/docs/extra.html', '<h1>extra</h1>');
-  mk('p6/app/package.json', JSON.stringify({ scripts: { dev: 'node server.js' } }));
+  mk('p6/app/package.json', JSON.stringify({ name: 'sidecar-app', scripts: { dev: 'node server.js' } }));
   mk('p6/tools/package.json', JSON.stringify({ scripts: { build: 'tsc' } }));
   mk('p6/node_modules/pkg/index.html', '<h1>junk</h1>');
   mk('p6/.cache/index.html', '<h1>hidden</h1>');
@@ -115,6 +115,13 @@ async function testDetectAllInventory() {
   check('prunes node_modules + dot-dirs', !ids.some((i) => i.includes('node_modules') || i.includes('.cache')), ids.join(' '));
   check('respects maxDepth (depth-4 file invisible)', !ids.some((i) => i.endsWith('deep.html')), ids.join(' '));
   check('BFS: root entry first', ids[0] === 'index.html', ids.join(' '));
+  const items = preview.detectAll(proj);
+  const idx = items.find((i) => i.id === 'index.html');
+  check('html label is its <title>, whitespace collapsed', idx && idx.label === 'My Root Site', JSON.stringify(idx));
+  const extra = items.find((i) => i.id === 'docs/extra.html');
+  check('no <title> falls back to file name', extra && extra.label === 'extra.html', JSON.stringify(extra));
+  const srv = items.find((i) => i.id === 'app/package.json#dev');
+  check('server label is the package name', srv && srv.label === 'sidecar-app', JSON.stringify(srv));
 }
 
 async function testDetectAllCaps() {

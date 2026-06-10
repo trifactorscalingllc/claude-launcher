@@ -470,18 +470,22 @@ async function ensureLaunchSub(p, rowEl) {
   if (dup && dup.dataset && dup.dataset.subFor === p.path) return;
 
   const sub = document.createElement('div');
-  sub.className = 'rr-sub';
+  sub.className = 'rr-sub collapsed'; // closed until the user opens it
   sub.dataset.subFor = p.path;
   sub.innerHTML = `
     <div class="rr-sub-head"><span class="ico">${svg('chev', 12)}</span> Launchable files <span class="count">${files.length}</span></div>
     <div class="rr-sub-rows">
-      ${files.map((f) => `
+      ${files.map((f) => {
+        const sec = f.kind === 'server' ? f.command : f.id; // where it lives / what it runs
+        return `
         <div class="rr-sub-row" data-id="${escapeHtml(f.id)}" data-cmd="${escapeHtml(f.command || '')}">
           ${svg(f.kind === 'server' ? 'bolt' : 'file', 13)}
           <span class="rr-sub-name" title="${escapeHtml(f.command || f.id)}">${escapeHtml(f.label)}</span>
+          ${sec && sec !== f.label ? `<span class="rr-sub-path">${escapeHtml(sec)}</span>` : ''}
           <button class="btn ghost btn-xs sub-launch" data-id="${escapeHtml(f.id)}">${svg('globe', 12)} Launch</button>
           <button class="icon-btn sub-stop hidden" data-id="${escapeHtml(f.id)}" title="Stop">${svg('stop', 13)}</button>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
   sub.querySelector('.rr-sub-head').addEventListener('click', () => sub.classList.toggle('collapsed'));
   sub.querySelectorAll('.sub-launch').forEach((b) =>

@@ -416,7 +416,8 @@ body.redact .acct-v { filter: blur(5px); }
 .rr-sub-rows { border-left: 1px solid var(--line-2); margin-left: 5px; padding-left: 12px; }
 .rr-sub-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--muted); }
 .rr-sub-row.running { color: var(--ink-2); }
-.rr-sub-name { font-size: 12.5px; color: var(--ink-2); font-family: "SFMono-Regular", "Consolas", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-sub-name { font-size: 12.5px; font-weight: 500; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.rr-sub-path { font-size: 11px; color: var(--muted); font-family: "SFMono-Regular", "Consolas", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rr-sub-row .sub-launch { display: inline-flex; align-items: center; gap: 4px; }
 .rr-sub-row .sub-launch.running { border-color: #2f8f5b; color: #2f8f5b; background: rgba(47, 143, 91, .08); }
 .rr-sub-row .sub-launch.running:hover { background: rgba(47, 143, 91, .16); }

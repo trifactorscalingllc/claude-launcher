@@ -117,10 +117,24 @@ function detect(projectPath) {
   return { launchable: false };
 }
 
+// A page's real name: its <title> tag (first 4KB is plenty — titles live in <head>).
+function htmlTitle(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(4096);
+    const n = fs.readSync(fd, buf, 0, 4096, 0);
+    fs.closeSync(fd);
+    const m = buf.toString('utf8', 0, n).match(/<title[^>]*>([^<]{1,80})/i);
+    if (m) return m[1].replace(/\s+/g, ' ').trim();
+  } catch {}
+  return '';
+}
+
 // Every launchable thing in the project, not just the best one — feeds the
 // per-project "launchables" subtree in the projects list. Each item gets a
 // stable id (path relative to the project root) so the renderer can ask to
-// launch that exact file/app later.
+// launch that exact file/app later. Labels are friendly names — the page's
+// <title> or the package's name — never raw paths (those ride along as id).
 function detectAll(projectPath, maxDepth = 3, maxItems = 12) {
   const out = [];
   const queue = [{ dir: projectPath, depth: 0 }];
@@ -145,14 +159,15 @@ function detectAll(projectPath, maxDepth = 3, maxItems = 12) {
           if (scriptName) {
             const pm = detectPackageManager(dir);
             const runner = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'bun' ? 'bun run' : 'pnpm';
+            const nice = (pkg && pkg.name) || path.basename(dir === projectPath ? projectPath : dir);
             out.push({
-              id: `${rel}#${scriptName}`, kind: 'server',
-              label: dir === projectPath ? `${runner} ${scriptName}` : `${path.dirname(rel)} · ${runner} ${scriptName}`,
+              id: `${rel}#${scriptName}`, kind: 'server', label: nice,
               dir, script: scriptName, command: `${runner} ${scriptName}`,
             });
           }
         } else if (/\.html?$/i.test(e.name)) {
-          out.push({ id: rel, kind: 'static', label: rel, dir, file: e.name });
+          const title = htmlTitle(path.join(dir, e.name));
+          out.push({ id: rel, kind: 'static', label: title || e.name, dir, file: e.name });
         }
       }
     }
