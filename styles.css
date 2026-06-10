@@ -189,17 +189,19 @@ body.has-update-banner .app { height: calc(100vh - 46px); margin-top: 46px; }
   gap: 14px;
 }
 
+/* Project cards float too: leading accent line, no box; hover = the accent
+   gradient washing in from the line (same family as the dash stat strip). */
 .card {
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  padding: 15px 16px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid rgba(var(--clay-rgb), 0.35);
+  border-radius: 0;
+  padding: 13px 16px;
   display: flex; flex-direction: column; gap: 9px;
-  box-shadow: var(--glass-shadow);
   cursor: pointer;
-  transition: border-color 0.12s, transform 0.08s, box-shadow 0.12s;
+  transition: border-color 0.12s, background 0.12s;
 }
-.card:hover { border-color: var(--clay-soft); box-shadow: 0 5px 18px rgba(60,40,30,0.09); }
+.card:hover { border-left-color: var(--clay); background: linear-gradient(90deg, rgba(var(--clay-rgb), 0.07), rgba(var(--clay-rgb), 0.015) 70%, transparent); }
 
 .card-top { display: flex; align-items: center; gap: 10px; }
 .card-name {
@@ -290,6 +292,9 @@ body.redact .acct-v { filter: blur(5px); }
 @keyframes cgpulse { 50% { opacity: 0.45; } }
 .cg-text { flex: 1; font-size: 12.5px; color: var(--ink-2); }
 .cg-working { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.cg-stage { color: var(--ink-2); }
+.cg-elapsed { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11px; }
+.cg-err { font-size: 11.5px; color: #c4503f; margin-right: 8px; }
 
 /* ---- Suggested searches (mined from usage) ---- */
 .sugg { max-width: 880px; }
@@ -425,17 +430,19 @@ body.redact .acct-v { filter: blur(5px); }
 .banner.error { color: #9a3b2c; border-color: #e6c4ba; background: #fbece8; }
 
 /* ---------- Settings panels ---------- */
+/* Floating, not boxed: body content sits directly on the page's accent
+   gradient wash. Division comes from the leading accent line + whitespace,
+   not from container backgrounds/borders (same language as .dash-stat). */
 .panel {
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  padding: 22px;
-  margin-bottom: 18px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid rgba(var(--clay-rgb), 0.55);
+  border-radius: 0;
+  padding: 4px 0 4px 20px;
+  margin-bottom: 30px;
   max-width: 620px;
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(14px) saturate(1.12);
 }
-.panel-title { font-size: 15px; font-weight: 600; }
+.panel-title { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
 .panel-sub { color: var(--muted); font-size: 13px; margin: 5px 0 16px; }
 .row { display: flex; gap: 10px; align-items: center; }
 .path-box {
@@ -447,6 +454,8 @@ body.redact .acct-v { filter: blur(5px); }
 
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
 .field > span { font-size: 13px; font-weight: 600; }
+/* bare text inputs (e.g. Settings → Terminal) were UA-default white — theme them */
+.field input[type="text"] { background: var(--cloud); border: 1px solid var(--line-2); border-radius: 6px; padding: 9px 11px; font-size: 13px; font-family: inherit; color: var(--ink); }
 select {
   appearance: none;
   background: var(--cloud) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2376736c' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
@@ -544,7 +553,7 @@ select:focus { outline: none; border-color: var(--clay); }
 .back-btn { flex-shrink: 0; }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.kpi { background: var(--glass); border: 1px solid var(--glass-border); border-radius: 12px; padding: 16px; box-shadow: var(--glass-shadow); backdrop-filter: blur(14px) saturate(1.12); }
+.kpi { background: transparent; border: none; border-left: 2px solid rgba(var(--clay-rgb), 0.55); border-radius: 0; padding: 2px 16px 2px 18px; }
 .kpi-val { font-size: 24px; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
 .kpi-lbl { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 
@@ -605,9 +614,11 @@ select:focus { outline: none; border-color: var(--clay); }
 /* Sharper corners — less "generic rounded card", more purpose-built dashboard */
 :root { --radius: 7px; }
 .btn, .icon-btn, .search, #newName, select, .path-box, #rootPath,
-.metrics-row, .stats, .nav-item, .kpi, .tr-track, .tag.ext,
+.metrics-row, .stats, .nav-item, .tr-track, .tag.ext,
 .theme-toggle, .hm-cell { border-radius: 5px; }
-.card, .panel, .avatar, .cmd-preview { border-radius: 7px; }
+.avatar, .cmd-preview { border-radius: 7px; }
+/* floating containers (leading line, no box) — radius would curl the line's ends */
+.panel, .kpi, .card, .ctx-list { border-radius: 0; }
 .modal { border-radius: 10px; }
 /* flatter shadows */
 :root { --shadow: 0 1px 2px rgba(31, 30, 29, 0.05); }
@@ -782,8 +793,9 @@ select:focus { outline: none; border-color: var(--clay); }
    their grid cell and stretch to equal row height — that's what makes it read
    as one composed dashboard instead of stacked cards. */
 .dash-stats { display: grid; grid-template-columns: repeat(4, 1fr); margin: 2px 0 22px; }
-.dash-stat { padding: 2px 24px; border-left: 1px solid var(--line-2); min-width: 0; }
-.dash-stat:first-child { border-left: none; padding-left: 4px; }
+/* every stat leads with the vertical bar — the "line in front" is the house
+   floating style, so the first column carries it too */
+.dash-stat { padding: 2px 24px 2px 18px; border-left: 2px solid rgba(var(--clay-rgb), 0.55); min-width: 0; }
 .dash-stat-val { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dash-stat-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 /* NB: scoped under .dash — Overview has its own (auto-fit) .dash-grid later in this file. */
@@ -806,7 +818,6 @@ select:focus { outline: none; border-color: var(--clay); }
 @media (max-width: 1180px) {
   .dash .dash-span8, .dash .dash-span6, .dash .dash-span4 { grid-column: span 12; }
   .dash-stats { grid-template-columns: repeat(2, 1fr); row-gap: 16px; }
-  .dash-stat:nth-child(odd) { border-left: none; padding-left: 4px; }
 }
 
 /* ---- Overview: history line chart + breakdown ---- */
@@ -888,7 +899,8 @@ select:focus { outline: none; border-color: var(--clay); }
 [data-theme="dark"] .sr-snip mark { background: #4a3328; color: #f0c3ac; }
 
 /* ---- Context: clean accordion list ---- */
-.ctx-list { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); margin-bottom: 24px; box-shadow: var(--shadow); }
+/* floating: no outer box — the leading line + row hairlines do the dividing */
+.ctx-list { border: none; border-left: 2px solid rgba(var(--clay-rgb), 0.55); border-radius: 0; overflow: hidden; background: transparent; margin-bottom: 28px; box-shadow: none; }
 .ctx-item { border-bottom: 1px solid var(--line); }
 .ctx-item:last-child { border-bottom: none; }
 .ctx-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; cursor: pointer; }
@@ -1236,6 +1248,13 @@ details.more-detail[open] > summary::before { transform: rotate(90deg); }
 .mcp-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .mcp-tool { font-size: 11.5px; color: var(--muted); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
 .mcp-tool b { color: var(--clay-deep); }
+/* MCP tab: relative call volume + project chips, floating on the page */
+.mcp-server { max-width: 760px; }
+.mcp-vol { height: 4px; background: rgba(var(--clay-rgb), 0.12); border-radius: 2px; margin: 10px 0 12px; overflow: hidden; }
+.mcp-vol > span { display: block; height: 100%; background: linear-gradient(90deg, var(--grad-from), var(--grad-to)); border-radius: 2px; }
+.mcp-projects { font-size: 11.5px; color: var(--muted); margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mcp-proj { color: var(--ink-2); background: var(--cloud); border-radius: 6px; padding: 2px 8px; }
+.mcp-proj i { font-style: normal; color: var(--clay-deep); font-weight: 600; }
 
 /* ---- project notes ---- */
 .proj-notes { width: 100%; min-height: 90px; resize: vertical; font-family: inherit; font-size: 13.5px;

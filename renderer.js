@@ -34,6 +34,7 @@ const ICONS = {
   play: '<path d="M7 4l13 8-13 8z"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>',
+  plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6z"/><path d="M12 18v4"/>',
 };
 
 // Shown on every cost figure so the dollar number is never mistaken for a bill.
@@ -1191,7 +1192,7 @@ function wireAgentForm() {
 
 function switchView(view) {
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === view));
-  ['projects', 'search', 'settings', 'overview', 'analytics', 'clients', 'detail', 'context', 'agents', 'routines', 'transcript'].forEach((v) => {
+  ['projects', 'search', 'settings', 'overview', 'analytics', 'clients', 'detail', 'context', 'agents', 'mcp', 'routines', 'transcript'].forEach((v) => {
     const el = $(`view-${v}`);
     if (el) el.classList.toggle('hidden', view !== v);
   });
@@ -1201,6 +1202,7 @@ function switchView(view) {
   if (view === 'search') loadSearch();
   if (view === 'clients') loadClients();
   if (view === 'agents') loadAgentsView();
+  if (view === 'mcp') loadMcp();
 }
 
 // ---------- Transcript viewer ----------
@@ -2115,11 +2117,10 @@ async function loadAnalytics(days) {
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
 
-  const [res, ms, ins, mcp] = await Promise.all([
+  const [res, ms, ins] = await Promise.all([
     window.launcher.overviewMetrics(overviewDays),
     window.launcher.modelSpend(),
     window.launcher.insights(),
-    window.launcher.mcpUsage(),
   ]);
   const r = res.range;
   lastAnalyticsRange = r;
@@ -2137,7 +2138,6 @@ async function loadAnalytics(days) {
   const stat = (val, lbl, tip) => `<div class="dash-stat"${tip ? ` title="${tip}"` : ''}>
       <div class="dash-stat-val">${val}</div><div class="dash-stat-lbl">${lbl}</div>
     </div>`;
-  const mcpHtml = mcpBlock(mcp);
   const topHtml = topSessionsPanel(ins);
   body.innerHTML = `<div class="dash">
     <div class="dash-stats">
@@ -2179,8 +2179,7 @@ async function loadAnalytics(days) {
         </div>
         ${trendsPanel(ins)}
       </div>
-      ${topHtml ? `<div class="${mcpHtml ? 'dash-span6' : 'dash-span12'}">${topHtml}</div>` : ''}
-      ${mcpHtml ? `<div class="${topHtml ? 'dash-span6' : 'dash-span12'}">${mcpHtml}</div>` : ''}
+      ${topHtml ? `<div class="dash-span12">${topHtml}</div>` : ''}
     </div>
   </div>`;
   renderHomeRecap();
@@ -2248,15 +2247,38 @@ async function renderCompare() {
   </table>`;
 }
 
-// which MCP servers/tools you lean on
-function mcpBlock(mcp) {
-  if (!mcp || !mcp.length) return '';
-  return `<div class="panel">
-    <div class="panel-title">MCP usage <span class="panel-hint">servers &amp; tools you lean on · all-time</span></div>
-    ${mcp.map((s) => `<div class="mcp-row">
-        <div class="mcp-head"><span class="mcp-name">${escapeHtml(s.server)}</span><span class="muted">${fmtNum(s.count)} call${s.count === 1 ? '' : 's'}</span></div>
-        <div class="mcp-tools">${s.tools.map(([t, c]) => `<span class="mcp-tool">${escapeHtml(t)} <b>${fmtNum(c)}</b></span>`).join('')}</div>
-      </div>`).join('')}
+// MCP tab — servers, tools and call volume, in the floating dash language
+// (stat strip up top, leading-line sections below; no boxes).
+async function loadMcp() {
+  const body = $('mcp-body');
+  if (!body) return;
+  const mcp = await window.launcher.mcpUsage(true);
+  if (!mcp || !mcp.length) {
+    body.innerHTML = dataEmpty('plug', 'No MCP activity yet', 'When your Claude Code sessions call MCP tools (servers configured in .mcp.json or claude.ai connectors), every server, tool and call count shows up here automatically.');
+    const g = body.querySelector('.go-projects'); if (g) g.addEventListener('click', () => switchView('projects'));
+    return;
+  }
+  const totalCalls = mcp.reduce((a, s) => a + s.count, 0);
+  const totalTools = mcp.reduce((a, s) => a + (s.toolCount || s.tools.length), 0);
+  const stat = (val, lbl) => `<div class="dash-stat">
+      <div class="dash-stat-val">${val}</div><div class="dash-stat-lbl">${lbl}</div>
+    </div>`;
+  const max = mcp[0].count || 1;
+  body.innerHTML = `<div class="dash">
+    <div class="dash-stats">
+      ${stat(fmtNum(mcp.length), 'Servers used')}
+      ${stat(fmtNum(totalCalls), 'Tool calls · all-time')}
+      ${stat(fmtNum(totalTools), 'Distinct tools')}
+      ${stat(escapeHtml(mcp[0].server), 'Most used server')}
+    </div>
+    ${mcp.map((s) => `<div class="panel mcp-server">
+      <div class="panel-title">${escapeHtml(s.server)}
+        <span class="panel-hint">${fmtNum(s.count)} call${s.count === 1 ? '' : 's'} · ${fmtNum(s.toolCount || s.tools.length)} tool${(s.toolCount || s.tools.length) === 1 ? '' : 's'} · ${Math.round(s.count / totalCalls * 100)}% of MCP traffic</span>
+      </div>
+      <div class="mcp-vol"><span style="width:${Math.max(2, Math.round(s.count / max * 100))}%"></span></div>
+      <div class="mcp-tools">${s.tools.map(([t, c]) => `<span class="mcp-tool">${escapeHtml(t)} <b>${fmtNum(c)}</b></span>`).join('')}</div>
+      ${s.projects && s.projects.length ? `<div class="mcp-projects">Used in ${s.projects.map(([p, c]) => `<span class="mcp-proj">${escapeHtml(p)} <i>${fmtNum(c)}</i></span>`).join('')}</div>` : ''}
+    </div>`).join('')}
   </div>`;
 }
 
@@ -2766,11 +2788,20 @@ async function init() {
     else if (state === 'error') { toast.classList.add('hidden'); if (checkedManually && ustate) ustate.textContent = "Couldn't check right now — try again shortly."; checkedManually = false; }
   });
 
-  // context rescue finished → flip the guard card to "start fresh"
-  window.launcher.onRescueDone(({ sessionId, ok }) => {
-    rescueState.set(sessionId, ok ? 'done' : undefined);
-    if (!ok) rescueState.delete(sessionId);
+  // context rescue finished → flip the guard card to "start fresh" (or show why it failed)
+  window.launcher.onRescueDone(({ sessionId, ok, error }) => {
+    rescueStage.delete(sessionId);
+    rescueStart.delete(sessionId);
+    if (ok) { rescueState.set(sessionId, 'done'); rescueError.delete(sessionId); }
+    else { rescueState.delete(sessionId); rescueError.set(sessionId, error || 'The handoff could not be written.'); }
     sampleActiveUsage(); // re-render the guard card promptly
+  });
+
+  // live rescue status straight from the headless session's event stream
+  window.launcher.onRescueProgress(({ sessionId, stage }) => {
+    rescueStage.set(sessionId, stage);
+    const el = document.querySelector(`.cg-working[data-sid="${sessionId}"] .cg-stage`);
+    if (el) el.textContent = stage;
   });
 
   // quick-task + partner live updates
@@ -2922,22 +2953,40 @@ async function sampleActiveUsage() {
 // memory intact) writes HANDOFF.md, then a fresh session picks it up — nothing lost.
 const CTX_GUARD_PCT = 85;
 const rescueState = new Map(); // sessionId -> 'running' | 'done'
+const rescueStage = new Map(); // sessionId -> live status line from the headless session
+const rescueStart = new Map(); // sessionId -> Date.now() when the rescue began
+const rescueError = new Map(); // sessionId -> last failure reason (shown inline next to Retry)
+const rescueInfo = new Map(); // sessionId -> {name, path, contextTokens} snapshot so the row survives leaving the hot list
+setInterval(() => { // live elapsed counter while a rescue runs
+  document.querySelectorAll('.cg-working[data-sid]').forEach((el) => {
+    const t0 = rescueStart.get(el.dataset.sid);
+    const tick = el.querySelector('.cg-elapsed');
+    if (t0 && tick) tick.textContent = fmtDuration(Date.now() - t0);
+  });
+}, 1000);
 function renderContextGuard(list) {
   const host = $('ctxGuard');
   if (!host) return;
   const hot = (list || []).filter((s) => s.contextTokens && Math.round(s.contextTokens / 200000 * 100) >= CTX_GUARD_PCT);
-  // keep showing sessions we just rescued (state 'done') even if they dropped off the hot list
-  const showing = hot.length || [...rescueState.values()].includes('done');
-  if (!showing) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+  // Sessions with a rescue running or finished must KEEP their row even after
+  // they drop off the hot list (post-compaction the pct dips below the gate, and
+  // the periodic re-render used to wipe the live status / "start fresh" button
+  // mid-rescue — seen in QA). rescueInfo holds a snapshot from click time.
+  const extras = [...rescueState.keys()]
+    .filter((sid) => rescueInfo.has(sid) && !hot.some((s) => s.sessionId === sid))
+    .map((sid) => rescueInfo.get(sid));
+  const all = [...hot, ...extras];
+  if (!all.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
   host.classList.remove('hidden');
-  const rows = hot.map((s, i) => {
+  const rows = all.map((s, i) => {
     const pct = Math.min(100, Math.round(s.contextTokens / 200000 * 100));
     const st = rescueState.get(s.sessionId);
+    const failed = rescueError.get(s.sessionId);
     const action = st === 'running'
-      ? `<span class="cg-working"><span class="ts-spin"></span> Saving everything to HANDOFF.md…</span>`
+      ? `<span class="cg-working" data-sid="${s.sessionId}"><span class="ts-spin"></span> <span class="cg-stage">${escapeHtml(rescueStage.get(s.sessionId) || 'Starting the rescue…')}</span> <span class="cg-elapsed"></span></span>`
       : st === 'done'
         ? `<button class="btn primary btn-xs cg-fresh" data-i="${i}">${svg('bolt', 13)} Start fresh session (reads the handoff)</button>`
-        : `<button class="btn primary btn-xs cg-rescue" data-i="${i}">${svg('drive', 13)} Rescue context now</button>`;
+        : `${failed ? `<span class="cg-err" title="${escapeHtml(failed)}">Last try failed: ${escapeHtml(failed.slice(0, 60))}</span> ` : ''}<button class="btn primary btn-xs cg-rescue" data-i="${i}">${svg('drive', 13)} ${failed ? 'Retry rescue' : 'Rescue context now'}</button>`;
     return `<div class="cg-row">
       <span class="cg-pct ${pct >= 95 ? 'crit' : ''}">${pct}%</span>
       <span class="cg-text"><strong>${escapeHtml(s.name)}</strong> — this conversation's memory is ${pct >= 95 ? 'almost completely' : 'nearly'} full. At 100% Claude compresses the chat and details get lost.</span>
@@ -2946,15 +2995,32 @@ function renderContextGuard(list) {
   }).join('');
   host.innerHTML = `<div class="ctx-guard">${rows}</div>`;
   host.querySelectorAll('.cg-rescue').forEach((b) => b.addEventListener('click', async () => {
-    const s = hot[Number(b.dataset.i)];
-    const r = await window.launcher.rescueContext(s.path, s.sessionId);
-    if (r && r.ok) { rescueState.set(s.sessionId, 'running'); showStatus(`Rescuing ${s.name}'s context — a full handoff is being written…`, 'ok'); }
-    else showStatus((r && r.error) || 'Could not start the rescue.', 'warn');
+    const s = all[Number(b.dataset.i)];
+    // flip to the working state IMMEDIATELY — the old flow waited for the IPC
+    // round-trip, so a fast double-click could fire two rescues
+    rescueState.set(s.sessionId, 'running');
+    rescueInfo.set(s.sessionId, { name: s.name, path: s.path, sessionId: s.sessionId, contextTokens: s.contextTokens });
+    rescueStart.set(s.sessionId, Date.now());
+    rescueStage.set(s.sessionId, 'Starting the rescue…');
+    rescueError.delete(s.sessionId);
     renderContextGuard(list);
+    const r = await window.launcher.rescueContext(s.path, s.sessionId);
+    if (r && r.ok) showStatus(`Rescuing ${s.name}'s context — a full handoff is being written…`, 'ok');
+    else if (/already rescuing/i.test((r && r.error) || '')) {
+      // a rescue is genuinely in flight — keep showing the working state
+    } else {
+      rescueState.delete(s.sessionId);
+      rescueStart.delete(s.sessionId);
+      rescueStage.delete(s.sessionId);
+      rescueError.set(s.sessionId, (r && r.error) || 'Could not start the rescue.');
+      showStatus((r && r.error) || 'Could not start the rescue.', 'warn');
+      renderContextGuard(list);
+    }
   }));
   host.querySelectorAll('.cg-fresh').forEach((b) => b.addEventListener('click', async () => {
-    const s = hot[Number(b.dataset.i)];
+    const s = all[Number(b.dataset.i)];
     rescueState.delete(s.sessionId);
+    rescueInfo.delete(s.sessionId);
     const r = await window.launcher.resumeFromHandoff(s.path);
     if (r && r.ok) showStatus('Fresh session opening — it starts by reading HANDOFF.md.', 'ok');
     renderContextGuard(list);

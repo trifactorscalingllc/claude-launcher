@@ -43,6 +43,11 @@ contextBridge.exposeInMainWorld('launcher', {
     ipcRenderer.on('rescue-done', h);
     return () => ipcRenderer.removeListener('rescue-done', h);
   },
+  onRescueProgress: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('rescue-progress', h);
+    return () => ipcRenderer.removeListener('rescue-progress', h);
+  },
   readTranscript: (args) => ipcRenderer.invoke('read-transcript', args),
   branchSession: (cwd, sessionId) => ipcRenderer.invoke('branch-session', cwd, sessionId),
   resumeSession: (cwd, sessionId) => ipcRenderer.invoke('resume-session', cwd, sessionId),
@@ -51,7 +56,7 @@ contextBridge.exposeInMainWorld('launcher', {
   activeSessions: () => ipcRenderer.invoke('active-sessions'),
   insights: () => ipcRenderer.invoke('insights'),
   awayDigest: () => ipcRenderer.invoke('away-digest'),
-  mcpUsage: () => ipcRenderer.invoke('mcp-usage'),
+  mcpUsage: (full) => ipcRenderer.invoke('mcp-usage', full),
   setNote: (projectPath, text) => ipcRenderer.invoke('set-note', projectPath, text),
   setLoginItem: (opts) => ipcRenderer.invoke('set-login-item', opts),
   dailyRecap: (opts) => ipcRenderer.invoke('daily-recap', opts),

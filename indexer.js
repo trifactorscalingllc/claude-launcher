@@ -626,25 +626,32 @@ class Indexer {
 
   // Which MCP servers/tools you lean on, aggregated from tool_use names of the
   // form `mcp__<server>__<tool>`. Returns servers sorted by total calls.
-  mcpUsage() {
+  mcpUsage(full) {
     const servers = {};
     for (const cwd in this.store.projects) {
       const m = this.metricsFor(cwd);
       if (!m) continue;
+      const projName = cwd.split(/[\\/]/).pop() || cwd;
       for (const name in m.totals.tools) {
         if (!name.startsWith('mcp__')) continue;
         const parts = name.split('__');
         const server = parts[1] || 'unknown';
         const tool = parts.slice(2).join('__') || name;
         const c = m.totals.tools[name];
-        if (!servers[server]) servers[server] = { server, count: 0, tools: {} };
+        if (!servers[server]) servers[server] = { server, count: 0, tools: {}, projects: {} };
         servers[server].count += c;
         servers[server].tools[tool] = (servers[server].tools[tool] || 0) + c;
+        servers[server].projects[projName] = (servers[server].projects[projName] || 0) + c;
       }
     }
     return Object.values(servers)
       .sort((a, b) => b.count - a.count)
-      .map((s) => ({ server: s.server, count: s.count, tools: Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 6) }));
+      .map((s) => ({
+        server: s.server, count: s.count,
+        tools: Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, full ? 24 : 6),
+        toolCount: Object.keys(s.tools).length,
+        projects: full ? Object.entries(s.projects).sort((a, b) => b[1] - a[1]).slice(0, 8) : undefined,
+      }));
   }
 
   // Deeper analytics for the Overview: efficiency, week-over-week trend,

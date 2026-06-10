@@ -24,7 +24,7 @@ const DEFAULTS = {
   apiKey: '',
   aiSummaries: false,
   theme: 'light',
-  accent: 'clay',      // accent palette: clay | lagoon | aubergine | jade
+  accent: 'clay',      // accent palette: clay | lagoon | aubergine | jade | sunset | cobalt | ember | mist
   hotkey: 'CommandOrControl+Shift+H', // global shortcut to summon the window
   hotkeyEnabled: true, // register the global shortcut
   lastSeenTs: 0,       // last time the window was focused/opened (for "while you were away")
@@ -1347,8 +1347,8 @@ ipcMain.handle('away-digest', () => {
 ipcMain.handle('insights', () => {
   try { return indexer.insights(); } catch { return null; }
 });
-ipcMain.handle('mcp-usage', () => {
-  try { return indexer.mcpUsage(); } catch { return []; }
+ipcMain.handle('mcp-usage', (_e, full) => {
+  try { return indexer.mcpUsage(!!full); } catch { return []; }
 });
 ipcMain.handle('set-note', (_e, projectPath, text) => {
   const cfg = loadConfig();
@@ -1551,7 +1551,15 @@ ipcMain.handle('rescue-context', (_e, { cwd, sessionId }) => {
     if (rescuesRunning.has(sessionId)) return { ok: false, error: 'Already rescuing this session.' };
     rescuesRunning.add(sessionId);
     const bin = resolveClaudeBin();
-    const args = ['-p', HANDOFF_PROMPT, '--resume', sessionId, '--fork-session', '--permission-mode', 'acceptEdits'];
+    // stream-json gives us real events to surface as live status instead of a
+    // static spinner; --verbose is required for stream-json with -p.
+    const args = ['-p', HANDOFF_PROMPT, '--resume', sessionId, '--fork-session',
+      '--permission-mode', 'acceptEdits', '--output-format', 'stream-json', '--verbose'];
+    const startedAt = Date.now();
+    const handoffPath = path.join(cwd, 'HANDOFF.md');
+    const sendProgress = (stage) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('rescue-progress', { sessionId, stage });
+    };
     let child;
     try {
       child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -1559,18 +1567,54 @@ ipcMain.handle('rescue-context', (_e, { cwd, sessionId }) => {
       rescuesRunning.delete(sessionId);
       return { ok: false, error: friendlyRoutineErr(e.message) };
     }
-    let err = '';
+    sendProgress('Forking the conversation (full memory intact)…');
+    let err = '', resultEvent = null, finished = false;
     if (child.stderr) child.stderr.on('data', (d) => { err += d; });
-    const timer = setTimeout(() => { try { child.kill(); } catch {} }, 5 * 60 * 1000);
-    child.on('error', () => { clearTimeout(timer); rescuesRunning.delete(sessionId); });
-    child.on('close', (code) => {
+    let buf = '';
+    if (child.stdout) child.stdout.on('data', (d) => {
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'system' && ev.subtype === 'init') sendProgress('Claude is re-reading the whole conversation…');
+        else if (ev.type === 'assistant') {
+          const blocks = (ev.message && ev.message.content) || [];
+          const tool = blocks.find((b) => b.type === 'tool_use');
+          if (tool && /write|edit/i.test(tool.name) && /HANDOFF/i.test(JSON.stringify(tool.input || {})))
+            sendProgress('Writing HANDOFF.md — every decision, file and next step…');
+          else if (tool) sendProgress('Reviewing the project state…');
+          else sendProgress('Summarizing the session…');
+        } else if (ev.type === 'result') resultEvent = ev;
+      }
+    });
+    // Generous ceiling: forking a ~190K-token session and writing a complete
+    // handoff can take well past 5 minutes — the old timer killed legitimate
+    // runs (the file often landed AFTER the kill, which read as "works the
+    // second time"). The result is judged below by the file itself, so even a
+    // timeout that races the write still reports success when the file landed.
+    const timer = setTimeout(() => { sendProgress('Taking longer than expected — still working…'); try { child.kill(); } catch {} }, 15 * 60 * 1000);
+    const finish = (ok, detail) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       rescuesRunning.delete(sessionId);
-      const ok = code === 0 && fs.existsSync(path.join(cwd, 'HANDOFF.md'));
       const name = cwd.split(/[\\/]/).pop();
       notify(ok ? `Context rescued — ${name}` : `Context rescue failed — ${name}`,
-        ok ? 'HANDOFF.md saved. Start a fresh session from the dashboard whenever you like.' : (err.trim().slice(0, 140) || 'The handoff could not be written.'));
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('rescue-done', { sessionId, ok });
+        ok ? 'HANDOFF.md saved. Start a fresh session from the dashboard whenever you like.' : (detail || 'The handoff could not be written.'));
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('rescue-done', { sessionId, ok, error: ok ? undefined : (detail || 'The handoff could not be written.') });
+    };
+    child.on('error', (e) => finish(false, friendlyRoutineErr(e && e.message)));
+    child.on('close', () => {
+      // Truth = a HANDOFF.md written during THIS run. A stale file from an old
+      // rescue must not fake success; a weird exit code must not fake failure.
+      let fresh = false;
+      try { fresh = fs.statSync(handoffPath).mtimeMs >= startedAt - 2000; } catch {}
+      const resultOk = resultEvent && resultEvent.subtype === 'success' && !resultEvent.is_error;
+      const detail = (resultEvent && !resultOk && typeof resultEvent.result === 'string' && resultEvent.result.slice(0, 140))
+        || err.trim().slice(0, 140);
+      finish(fresh, fresh ? undefined : detail);
     });
     return { ok: true, started: true };
   } catch (e) { return { ok: false, error: e.message }; }
@@ -2396,7 +2440,7 @@ ipcMain.handle('set-theme', (_e, theme) => {
   return cfg.theme;
 });
 
-const ACCENTS = ['clay', 'lagoon', 'aubergine', 'jade'];
+const ACCENTS = ['clay', 'lagoon', 'aubergine', 'jade', 'sunset', 'cobalt', 'ember', 'mist'];
 ipcMain.handle('set-accent', (_e, accent) => {
   const cfg = loadConfig();
   cfg.accent = ACCENTS.includes(accent) ? accent : 'clay';
