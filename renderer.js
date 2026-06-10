@@ -1312,16 +1312,27 @@ async function renderSearchSuggestions() {
   try { s = await window.launcher.searchSuggestions(); } catch { return; }
   if (!s || (!s.topics.length && !s.recent.length && !s.files.length)) return;
   if ($('searchInput').value.trim().length >= 2) return; // user typed while we mined
-  const group = (label, items, icon) => items.length
-    ? `<div class="sug-group"><span class="sug-label">${svg(icon, 12)} ${label}</span>${items.map((t) => `<button class="sug-chip" data-q="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}</div>` : '';
-  body.innerHTML = `<div class="sug-wrap">
-      <p class="sug-head">Suggested searches — mined from your recent work</p>
-      ${group('Themes in your sessions', s.topics, 'bulb')}
-      ${group('Recent projects', s.recent, 'grid')}
-      ${group('Most-edited files', s.files, 'file')}
-      ${group('Tools you use most', s.tools, 'terminal')}
+  const card = (title, icon, items) => items.length
+    ? `<div class="panel sugg-card">
+        <div class="sugg-card-head">${svg(icon, 14)}<span>${title}</span></div>
+        ${items.map((t) => `<button class="sugg-row" data-q="${escapeHtml(t)}"><span class="sugg-row-label">${escapeHtml(t)}</span>${svg('chev', 14)}</button>`).join('')}
+      </div>` : '';
+  body.innerHTML = `<div class="sugg">
+      <div class="sugg-hero">
+        <span class="sugg-eyebrow">Suggested searches</span>
+        <div class="sugg-title">Pick up where you left off</div>
+        <p class="sugg-sub">Mined from your own work — the themes recurring across your sessions, the projects and files you touch most.</p>
+      </div>
+      ${s.topics.length ? `
+      <div class="sugg-card-head">${svg('bulb', 14)}<span>Themes in your sessions</span></div>
+      <div class="sugg-themes">${s.topics.map((t) => `<button class="sugg-theme" data-q="${escapeHtml(t)}"><span>${escapeHtml(t)}</span></button>`).join('')}</div>` : ''}
+      <div class="sugg-grid">
+        ${card('Recent projects', 'grid', s.recent)}
+        ${card('Most-edited files', 'file', s.files)}
+        ${card('Tools you use most', 'terminal', s.tools)}
+      </div>
     </div>`;
-  body.querySelectorAll('.sug-chip').forEach((b) => b.addEventListener('click', () => {
+  body.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => {
     $('searchInput').value = b.dataset.q;
     runSearch(b.dataset.q);
   }));
@@ -1421,9 +1432,23 @@ function renderMemBody(body) {
 }
 function ctxItem(m) {
   const title = m.description || m.name || m.file;
-  return `<div class="ctx-item">
+  return `<div class="ctx-item" data-file="${escapeHtml(m.file)}">
     <div class="ctx-row"><span class="ctx-title">${escapeHtml(title)}</span><span class="ctx-chev">${svg('chev', 16)}</span></div>
-    <div class="ctx-detail">${renderMemBody(m.body)}</div>
+    <div class="ctx-detail">
+      <div class="ctx-view">${renderMemBody(m.body)}</div>
+      <div class="ctx-tools">
+        <button class="btn ghost btn-xs ctx-edit">${svg('edit', 14)} Edit</button>
+        <button class="btn ghost btn-xs ctx-del">${svg('archive', 14)} Forget</button>
+      </div>
+      <div class="ctx-editor hidden">
+        <textarea class="ctx-ta" spellcheck="false"></textarea>
+        <div class="ctx-editor-actions">
+          <button class="btn primary btn-xs ctx-save">Save</button>
+          <button class="btn ghost btn-xs ctx-discard">Discard</button>
+          <span class="ctx-edit-note">Writes straight into Claude's memory file — the next session reads your version.</span>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 const CTX_SECTIONS = [
@@ -1438,6 +1463,7 @@ async function loadContext() {
   const body = $('context-body');
   body.innerHTML = '<p class="empty">Loading…</p>';
   const ctx = await window.launcher.getContext();
+  const rawByFile = {};
   let html = '';
   if (!ctx.count) {
     html += `<div class="panel"><p class="panel-sub">No memory found yet. As you work with Claude and it learns your preferences, projects, and goals, they'll show up here.</p></div>`;
@@ -1445,16 +1471,89 @@ async function loadContext() {
   for (const s of CTX_SECTIONS) {
     const items = ctx.groups[s.key] || [];
     if (!items.length) continue;
+    items.forEach((m) => { rawByFile[m.file] = m.body; });
     html += `<div class="section-head">${svg(s.icon, 15)} ${s.title} <span class="count">${items.length}</span></div>`;
     html += `<div class="ctx-list">${items.map(ctxItem).join('')}</div>`;
   }
   if (ctx.claudeMd && ctx.claudeMd.trim()) {
     html += `<div class="section-head">${svg('gear', 15)} Global instructions <span class="count">CLAUDE.md</span></div>`;
-    html += `<div class="ctx-list"><div class="ctx-item"><div class="ctx-row"><span class="ctx-title">Your global instructions for all projects</span><span class="ctx-chev">${svg('chev', 16)}</span></div><div class="ctx-detail"><pre class="claudemd">${escapeHtml(ctx.claudeMd.trim())}</pre></div></div></div>`;
+    html += `<div class="ctx-list"><div class="ctx-item" id="ctx-claudemd">
+      <div class="ctx-row"><span class="ctx-title">Your global instructions for all projects</span><span class="ctx-chev">${svg('chev', 16)}</span></div>
+      <div class="ctx-detail">
+        <div class="ctx-view"><pre class="claudemd">${escapeHtml(ctx.claudeMd.trim())}</pre></div>
+        <div class="ctx-tools"><button class="btn ghost btn-xs ctx-edit">${svg('edit', 14)} Edit</button></div>
+        <div class="ctx-editor hidden">
+          <textarea class="ctx-ta" spellcheck="false"></textarea>
+          <div class="ctx-editor-actions">
+            <button class="btn primary btn-xs ctx-save">Save</button>
+            <button class="btn ghost btn-xs ctx-discard">Discard</button>
+            <span class="ctx-edit-note">Saves to ~/.claude/CLAUDE.md — every project's next session obeys it.</span>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
   }
   body.innerHTML = html;
   body.querySelectorAll('.ctx-row').forEach((row) =>
     row.addEventListener('click', () => row.parentElement.classList.toggle('open')));
+
+  // Inline edit / forget — direct overrides of Claude's internal knowledge.
+  const wireEditor = (item, getRaw, save, onSaved) => {
+    const view = item.querySelector('.ctx-view');
+    const tools = item.querySelector('.ctx-tools');
+    const ed = item.querySelector('.ctx-editor');
+    const ta = item.querySelector('.ctx-ta');
+    const show = (editing) => {
+      view.classList.toggle('hidden', editing);
+      tools.classList.toggle('hidden', editing);
+      ed.classList.toggle('hidden', !editing);
+    };
+    item.querySelector('.ctx-edit').addEventListener('click', (e) => {
+      e.stopPropagation();
+      ta.value = getRaw();
+      show(true);
+      ta.style.height = Math.min(420, Math.max(160, ta.scrollHeight + 8)) + 'px';
+      ta.focus();
+    });
+    item.querySelector('.ctx-discard').addEventListener('click', () => show(false));
+    item.querySelector('.ctx-save').addEventListener('click', async () => {
+      const r = await save(ta.value);
+      if (r && r.error) { showStatus(`Couldn't save: ${r.error}`, 'warn'); return; }
+      onSaved(ta.value);
+      show(false);
+    });
+  };
+  body.querySelectorAll('.ctx-item[data-file]').forEach((item) => {
+    const file = item.dataset.file;
+    wireEditor(item,
+      () => rawByFile[file] || '',
+      (v) => window.launcher.saveMemory(file, v),
+      (v) => {
+        rawByFile[file] = v.trim();
+        item.querySelector('.ctx-view').innerHTML = renderMemBody(rawByFile[file]);
+        showStatus('Memory updated — Claude reads your version from now on.', 'ok');
+      });
+    item.querySelector('.ctx-del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const title = item.querySelector('.ctx-title').textContent;
+      if (!confirm(`Forget this memory?\n\n"${title}"\n\nThe file is deleted — Claude won't know this anymore.`)) return;
+      const r = await window.launcher.deleteMemory(file);
+      if (r && r.error) { showStatus(`Couldn't delete: ${r.error}`, 'warn'); return; }
+      showStatus('Forgotten.', 'ok');
+      loadContext();
+    });
+  });
+  const cm = body.querySelector('#ctx-claudemd');
+  if (cm) {
+    wireEditor(cm,
+      () => ctx.claudeMd,
+      (v) => window.launcher.saveClaudeMd(v),
+      (v) => {
+        ctx.claudeMd = v;
+        cm.querySelector('.ctx-view').innerHTML = `<pre class="claudemd">${escapeHtml(v.trim())}</pre>`;
+        showStatus('Global instructions saved.', 'ok');
+      });
+  }
 }
 
 // ---------- Routines view (draft) ----------
@@ -1824,20 +1923,6 @@ function metricChart(range, metric, view) {
   }).join('');
   return `<svg class="linechart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${xlab}${plot}</svg><div class="legend">${legend}</div>`;
 }
-function analyticsChartPanel(range) {
-  const mb = (m, label) => `<button data-metric="${m}" class="${analyticsMetric === m ? 'active' : ''}">${label}</button>`;
-  const vb = (v, label) => `<button data-view="${v}" class="${analyticsView === v ? 'active' : ''}">${label}</button>`;
-  return `<div class="panel">
-    <div class="panel-title">Chart
-      <div class="chart-controls">
-        <div class="seg metric-seg">${mb('time', 'Time')}${mb('cost', 'Cost')}${mb('tokens', 'Tokens')}</div>
-        <div class="seg view-seg">${vb('lines', 'Lines')}${vb('stacked', 'Stacked')}</div>
-      </div>
-    </div>
-    <div id="analytics-chart">${metricChart(range, analyticsMetric, analyticsView)}</div>
-  </div>`;
-}
-
 function historyChart(range) {
   const { labels, hourly } = range;
   const projects = (range.breakdown || []).filter((p) => p.totalMs > 0);
@@ -1932,26 +2017,28 @@ function deltaBadge(pct, lastVal) {
   const up = pct >= 0;
   return `<span class="delta ${up ? 'up' : 'down'}">${up ? '▲' : '▼'}${Math.abs(pct)}% vs last wk</span>`;
 }
-function insightsBlock(ins) {
+function trendsPanel(ins) {
   if (!ins) return '';
   const w = ins.wow || {};
-  const trends = `
+  return `
     <div class="panel">
       <div class="panel-title">Trends <span class="panel-hint">this week vs last</span></div>
       <div class="kv"><span>Time this week</span><span>${fmtDuration(w.thisMs || 0)} ${deltaBadge(w.msPct, w.lastMs)}</span></div>
       ${ins.anyHourly ? `<div class="kv"><span>Busiest</span><span>${DOW[ins.busiestDow]} · ${hourLabel(ins.busiestHour)}</span></div>` : ''}
       <div class="kv"><span>Spend this week <span class="est">est.</span></span><span class="muted" title="${COST_TIP}">${fmtCost(w.thisCost || 0)} ${deltaBadge(w.costPct, w.lastCost)}</span></div>
     </div>`;
-  const list = (ins.topByTime && ins.topByTime.length) ? ins.topByTime : [];
-  const top = list.length ? `
+}
+function topSessionsPanel(ins) {
+  const list = (ins && ins.topByTime && ins.topByTime.length) ? ins.topByTime : [];
+  if (!list.length) return '';
+  return `
     <div class="panel">
       <div class="panel-title">Longest sessions <span class="panel-hint">all-time · click to read</span></div>
       ${list.map((s) => `<div class="kv lead-row" data-path="${escapeHtml(s.path)}" data-session="${escapeHtml(s.sessionId)}">
           <span class="lead-name">${escapeHtml(s.title || s.name)} <span class="s-open">read ›</span></span>
           <span class="muted">${fmtDuration(s.activeMs)}</span>
         </div>`).join('')}
-    </div>` : '';
-  return `<div class="detail-grid">${trends}${top}</div>`;
+    </div>`;
 }
 
 // Friendly empty state for data views before there's any Claude history.
@@ -2025,7 +2112,6 @@ async function loadOverview() {
 // efficiency/trends, top sessions, MCP usage.
 async function loadAnalytics(days) {
   overviewDays = days || overviewDays || 7;
-  renderHomeRecap();
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
 
@@ -2046,35 +2132,58 @@ async function loadAnalytics(days) {
     return;
   }
 
-  body.innerHTML = `
-    <div class="kpis">
-      <div class="kpi"><div class="kpi-val">${fmtDuration(t.activeMs)}</div><div class="kpi-lbl">Time · ${rangeWord}</div></div>
-      <div class="kpi"><div class="kpi-val">${fmtNum(t.sessions)}</div><div class="kpi-lbl">Sessions</div></div>
-      <div class="kpi"><div class="kpi-val">${fmtNum(t.projects)}</div><div class="kpi-lbl">Projects</div></div>
-      <div class="kpi quiet" title="${COST_TIP}"><div class="kpi-val">${fmtCost(t.cost)}</div><div class="kpi-lbl">Cost <span class="est">est.</span></div></div>
+  // Real-dashboard composition: a flat stat strip (numbers live on the page, not in
+  // boxes), then a 12-column grid where every row's panels stretch to equal height.
+  const stat = (val, lbl, tip) => `<div class="dash-stat"${tip ? ` title="${tip}"` : ''}>
+      <div class="dash-stat-val">${val}</div><div class="dash-stat-lbl">${lbl}</div>
+    </div>`;
+  const mcpHtml = mcpBlock(mcp);
+  const topHtml = topSessionsPanel(ins);
+  body.innerHTML = `<div class="dash">
+    <div class="dash-stats">
+      ${stat(fmtDuration(t.activeMs), `Active time · ${rangeWord}`)}
+      ${stat(fmtNum(t.sessions), 'Sessions')}
+      ${stat(fmtNum(t.projects), 'Projects')}
+      ${stat(fmtCost(t.cost), 'Cost · estimated', COST_TIP)}
     </div>
-    ${analyticsChartPanel(r)}
-    <div class="panel">
-      <div class="panel-title">Projects by time <span class="panel-hint">${rangeWord}</span></div>
-      ${r.breakdown.length ? `<table class="breakdown">
-        <thead><tr><th>Project</th><th>Time</th><th>Cost</th><th>Sessions</th><th>Last active</th></tr></thead>
-        <tbody>
-          ${r.breakdown.map((p) => `<tr data-path="${p.path}">
-            <td class="bd-name">${p.name}</td>
-            <td>${fmtDuration(p.activeMs)}</td>
-            <td>${fmtCost(p.cost)}</td>
-            <td>${fmtNum(p.sessions)}</td>
-            <td class="muted">${relTime(p.lastTs)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : '<p class="panel-sub">No project activity in this range.</p>'}
+    <div class="dash-grid">
+      <div class="panel dash-span8 dash-chart-panel">
+        <div class="panel-title">Activity <span class="panel-hint">${rangeWord}</span>
+          <div class="chart-controls">
+            <div class="seg metric-seg">${['time', 'cost', 'tokens'].map((m) => `<button data-metric="${m}" class="${analyticsMetric === m ? 'active' : ''}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
+            <div class="seg view-seg">${[['lines', 'Lines'], ['stacked', 'Stacked']].map(([v, l]) => `<button data-view="${v}" class="${analyticsView === v ? 'active' : ''}">${l}</button>`).join('')}</div>
+          </div>
+        </div>
+        <div id="analytics-chart">${metricChart(r, analyticsMetric, analyticsView)}</div>
+      </div>
+      <div id="recapHome" class="recap-home dash-span4 hidden"></div>
+      <div class="panel dash-span8">
+        <div class="panel-title">Projects by time <span class="panel-hint">${rangeWord}</span></div>
+        ${r.breakdown.length ? `<table class="breakdown">
+          <thead><tr><th>Project</th><th>Time</th><th>Cost</th><th>Sessions</th><th>Last active</th></tr></thead>
+          <tbody>
+            ${r.breakdown.map((p) => `<tr data-path="${p.path}">
+              <td class="bd-name">${p.name}</td>
+              <td>${fmtDuration(p.activeMs)}</td>
+              <td>${fmtCost(p.cost)}</td>
+              <td>${fmtNum(p.sessions)}</td>
+              <td class="muted">${relTime(p.lastTs)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '<p class="panel-sub">No project activity in this range.</p>'}
+      </div>
+      <div class="dash-span4 dash-stack">
+        <div class="panel">
+          <div class="panel-title">Spend by model <span class="panel-hint">all-time</span></div>
+          ${modelMixBars(ms)}
+        </div>
+        ${trendsPanel(ins)}
+      </div>
+      ${topHtml ? `<div class="${mcpHtml ? 'dash-span6' : 'dash-span12'}">${topHtml}</div>` : ''}
+      ${mcpHtml ? `<div class="${topHtml ? 'dash-span6' : 'dash-span12'}">${mcpHtml}</div>` : ''}
     </div>
-    <div class="panel">
-      <div class="panel-title">Spend by model <span class="panel-hint">all-time</span></div>
-      ${modelMixBars(ms)}
-    </div>
-    ${insightsBlock(ins)}
-    ${mcpBlock(mcp)}`;
+  </div>`;
+  renderHomeRecap();
 
   body.querySelectorAll('tr[data-path]').forEach((row) => {
     row.addEventListener('click', () => {

@@ -2201,6 +2201,49 @@ ipcMain.handle('get-context', async () => {
   return { groups, count, claudeMd, memDir };
 });
 
+// Direct edits to what Claude remembers: the user can rewrite or delete any memory
+// (and the global CLAUDE.md) from the Context tab — an immediate override of
+// internal knowledge, no session required. Filename is validated to a plain .md
+// inside the memory dir; the frontmatter block is preserved, only the body changes.
+function memoryDir() {
+  const encoded = HOME.replace(/[\\/:]/g, '-');
+  return path.join(CLAUDE_PROJECTS_DIR, encoded, 'memory');
+}
+function safeMemoryPath(file) {
+  if (typeof file !== 'string' || file === 'MEMORY.md' || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(file)) return '';
+  return path.join(memoryDir(), file);
+}
+ipcMain.handle('save-memory', async (_e, file, body) => {
+  const p = safeMemoryPath(file);
+  if (!p) return { error: 'Invalid memory file name.' };
+  try {
+    const text = await fsp.readFile(p, 'utf8');
+    const fm = text.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n)/);
+    await fsp.writeFile(p, (fm ? fm[1] : '') + String(body || '').trim() + '\n');
+    return { ok: true };
+  } catch (err) { return { error: err.message }; }
+});
+ipcMain.handle('delete-memory', async (_e, file) => {
+  const p = safeMemoryPath(file);
+  if (!p) return { error: 'Invalid memory file name.' };
+  try {
+    await fsp.unlink(p);
+    // scrub the index line so MEMORY.md doesn't point at a ghost
+    const idx = path.join(memoryDir(), 'MEMORY.md');
+    try {
+      const lines = (await fsp.readFile(idx, 'utf8')).split(/\r?\n/);
+      await fsp.writeFile(idx, lines.filter((l) => !l.includes(`(${file})`)).join('\n'));
+    } catch {}
+    return { ok: true };
+  } catch (err) { return { error: err.message }; }
+});
+ipcMain.handle('save-claudemd', async (_e, content) => {
+  try {
+    await fsp.writeFile(path.join(HOME, '.claude', 'CLAUDE.md'), String(content || ''));
+    return { ok: true };
+  } catch (err) { return { error: err.message }; }
+});
+
 // Read the signed-in Claude account + subscription plan straight from what Claude Code
 // already stored locally (~/.claude.json → oauthAccount). No network, no token exposure —
 // we never touch ~/.claude/.credentials.json. This is the real plan, not a guess.
