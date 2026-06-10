@@ -595,7 +595,13 @@ function maybeSilentInstall(info) {
 function findPendingInstaller() {
   try {
     const dir = path.join(HOME, 'AppData', 'Local', 'claude-launcher-updater', 'pending');
-    const f = fs.readdirSync(dir).find((n) => /Setup.*\.exe$/i.test(n));
+    // electron-updater can leave the PREVIOUS release's installer behind (seen live
+    // on the 1.15.0 rollout: pending held 1.14.1 AND 1.15.0, and alphabetical find()
+    // would have reinstalled the old version). Pick the highest version, not the first.
+    const ver = (n) => (n.match(/(\d+)\.(\d+)\.(\d+)/) || [0, 0, 0, 0]).slice(1).reduce((a, x) => a * 10000 + Number(x), 0);
+    const f = fs.readdirSync(dir)
+      .filter((n) => /Setup.*\.exe$/i.test(n) && !/^temp-/i.test(n))
+      .sort((a, b) => ver(b) - ver(a))[0];
     return f ? path.join(dir, f) : '';
   } catch { return ''; }
 }
