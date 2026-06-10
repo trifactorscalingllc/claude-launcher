@@ -548,7 +548,13 @@ function sendUpdate(state, info) {
 }
 function setupAutoUpdate() {
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // We run the installer OURSELVES (performInstall / before-quit). With this true,
+  // electron-updater ALSO spawns the installer on every quit — two NSIS instances
+  // race, the loser blocks forever on the NSIS single-instance mutex, and the
+  // zombie holds a lock on the pending exe. Watched it happen on the 1.15.0
+  // rollout (a Setup process from the PREVIOUS rollout was still alive 40 min
+  // later, wedging every later install).
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on('checking-for-update', () => sendUpdate('checking'));
   autoUpdater.on('update-available', (info) => sendUpdate('available', { version: info.version }));
   autoUpdater.on('update-not-available', () => sendUpdate('current'));
