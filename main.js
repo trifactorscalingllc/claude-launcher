@@ -598,12 +598,14 @@ function findPendingInstaller() {
 // (Plain autoUpdater.quitAndInstall is unreliable here: Windows Defender holds the
 // old exe, NSIS's uninstall fails, nothing happens. Verified again live when the
 // first silent update stalled — the download was complete but quitAndInstall no-oped.)
+let installInitiated = false;
 function performInstall() {
   // macOS unsigned: Squirrel.Mac silently restarts the OLD version. Hand over the dmg.
   if (process.platform === 'darwin') {
     shell.openExternal('https://github.com/trifactorscalingllc/claude-helm/releases/latest');
     return;
   }
+  installInitiated = true;
   app.isQuitting = true;
   const exe = process.execPath;
   const installer = process.platform === 'win32' ? findPendingInstaller() : '';
@@ -769,7 +771,28 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => { app.isQuitting = true; try { indexer.flushSync(); } catch {} try { preview.stopAll(); } catch {} try { share.stopAll(); } catch {} try { partner.stopAll(); } catch {} });
+app.on('before-quit', () => {
+  app.isQuitting = true;
+  try { indexer.flushSync(); } catch {}
+  try { preview.stopAll(); } catch {}
+  try { share.stopAll(); } catch {}
+  try { partner.stopAll(); } catch {}
+  // Chrome-on-quit: a downloaded update gets installed as we exit (no relaunch).
+  // Uses the proven delayed-/S path — electron-updater's own quit-time install
+  // silently no-ops on machines where Defender holds the old exe.
+  try {
+    if (!installInitiated && process.platform === 'win32'
+        && lastUpdateState && lastUpdateState.state === 'ready'
+        && loadConfig().silentUpdates !== false) {
+      const installer = findPendingInstaller();
+      if (installer) {
+        installInitiated = true;
+        spawn(process.env.ComSpec || 'cmd.exe', ['/c', `ping -n 5 127.0.0.1 >nul & "${installer}" /S`],
+          { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+      }
+    }
+  } catch {}
+});
 app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch {} });
 
 app.on('window-all-closed', () => {

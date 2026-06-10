@@ -4,128 +4,111 @@
 
 # Claude Helm
 
-**The dashboard for Claude Code.**
-Monitor, search, and launch every project — time, cost, transcripts, and context, all in one place.
+**Mission control for Claude Code.**
+Monitor every session, launch every project, rescue every context — and share work with clients and partners. All local, self-updating.
 
 [![Latest release](https://img.shields.io/github/v/release/trifactorscalingllc/claude-helm?color=d97757&label=download)](https://github.com/trifactorscalingllc/claude-helm/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-444)
 ![Local only](https://img.shields.io/badge/data-100%25%20local-4f7d5b)
 ![License](https://img.shields.io/badge/license-MIT-444)
 
-<br/>
-
-<img src="docs/screenshot.png" width="860" alt="Claude Helm dashboard" />
+**[Website](https://trifactorscalingllc.github.io/claude-helm/)** · **[Download](https://github.com/trifactorscalingllc/claude-helm/releases/latest)**
 
 </div>
 
 ---
 
-Claude Helm reads your local Claude Code history (`~/.claude`) and turns it into a real
-dashboard: **how much time and money each project costs, what you worked on, and a one-click
-way to jump back in.** It runs entirely on your machine, and it auto-updates itself.
+Claude Helm reads your local Claude Code history (`~/.claude`) and turns it into a real dashboard: how much time and money each project costs, what you worked on, which sessions are live right now — plus one-click ways to jump back in, run the app you just built, dispatch headless tasks, and share work with the people who need to see it. It runs entirely on your machine.
 
 ## Download
 
-**[⬇ Get the latest release](https://github.com/trifactorscalingllc/claude-helm/releases/latest)** — Windows, macOS, and Linux:
+**[⬇ Get the latest release](https://github.com/trifactorscalingllc/claude-helm/releases/latest)**
 
 | Platform | File | First-run note |
 |---|---|---|
-| **Windows** | `Claude-Helm-Setup-*.exe` | SmartScreen → **More info → Run anyway**. Then it **updates itself silently.** |
-| **macOS (Apple Silicon)** | `Claude-Helm-*-arm64.dmg` | Drag to **Applications**, then run the one-line unblock below — macOS marks unsigned downloads as "damaged." |
+| **Windows** | `Claude-Helm-Setup-*.exe` | SmartScreen → **More info → Run anyway**. After that it **updates itself silently** in the tray. |
+| **macOS (Apple Silicon)** | `Claude-Helm-*-arm64.dmg` | Drag to **Applications**, then run the one-line unblock below. |
 | **macOS (Intel)** | `Claude-Helm-*-x64.dmg` | Same as above. |
 | **Linux** | `Claude-Helm-*.AppImage` | `chmod +x` then run. |
 
 ### macOS first run — "Claude Helm is damaged and can't be opened"
 
-This is **not** corruption. The app isn't code-signed yet, so when your browser downloads it macOS attaches a quarantine flag and — on Apple Silicon especially — refuses to launch it. Right-click → Open does **not** clear this; you need to strip the quarantine flag once:
+Not corruption — the app isn't code-signed yet, so macOS quarantines the download. Strip the flag once:
 
-1. Open the `.dmg` and drag **Claude Helm** into **Applications**.
-2. In **Terminal**, run:
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Claude Helm.app"
-   ```
-3. Open Claude Helm normally. You only do this once per install.
+```bash
+xattr -dr com.apple.quarantine "/Applications/Claude Helm.app"
+```
 
-_The apps aren't code-signed yet, so each OS shows a one-time security prompt. Windows auto-updates in place; macOS/Linux re-download to update until signed._
+Update behavior while unsigned: **Windows auto-updates silently in place.** macOS detects new versions and hands you the new dmg (macOS refuses to auto-swap unsigned apps); Linux re-downloads.
 
 ---
 
 ## Features
 
-### 🚀 Launch
-- **One-click "Open in Claude"** — opens a terminal already in the project, running `claude`. No `cd`, no trust prompt.
-- **Create projects** from the app (folder + open in Claude in one step).
-- **Per-launch overrides** — open *this* project with Opus / Sonnet / Haiku without changing your default.
-- **Open in editor** (VS Code, or your file explorer) right from the card.
-- **Cross-platform launch** — Windows Terminal, macOS Terminal/iTerm, or your Linux terminal.
+### 🖥 Live mission control
+- **Every live session, named** — the ambient line shows each running Claude session (each clickable), what it's doing, whether it's waiting on you, and how full its context window is.
+- **"Waiting for you" pings** — when a session finishes its turn and sits idle, you get a desktop notification and a tray badge. No more stalled sessions in background windows.
+- **Context guard** — when a session's context passes 85%, a card explains the problem in plain words and offers a one-click rescue: a fork of the conversation (full memory intact) writes `HANDOFF.md`, then **Start fresh session** opens a new 200K-context session that begins by reading it. You never lose context.
+- **Session-finished and budget notifications**, plus a system-tray summary of today's time and cost.
 
-### 📊 Monitor & 📈 Analyze
-- **Live engine** tails every transcript and computes, per project: **time spent**, **cost** (token×price estimate), sessions, tokens, tools used, files touched, and models.
-- **Card metrics** — time, cost, a 14-day activity sparkline, and a live **"● active now"** dot.
-- **Git status on cards** — current branch, dirty/clean, and ahead/behind your upstream, with the last commit on hover.
-- **Today's recap** — an end-of-day, AI-written standup of what you worked on across every project (with a factual fallback when no API key is set).
-- **Launch at login** — optionally start with your computer and sit in the tray, always monitoring.
-- **Live "Active now" panel** — the session running this second, with a ticking timer and running token/cost counter.
-- **⌘K command palette** — jump to any project, run a search, or switch tabs from the keyboard.
-- **Deeper analytics** — cache-hit rate, $/turn, tokens/turn, week-over-week trends, busiest hour/day, and a most-expensive-sessions leaderboard.
-- **Encrypted keys + real billing** — API keys are stored in your OS keychain (never plaintext); add an org Admin key to pull your *actual* billed month-to-date cost.
-- **Recap (today / this week)**, **MCP usage** (which servers & tools you lean on), **project notes**, and **side-by-side project compare**.
-- **System tray** — today's time + cost at a glance, plus an active-session indicator. Closing the window keeps it monitoring in the tray.
-- **Desktop notifications** + **cost alerts** — get warned when a session finishes and when you hit 80%/100% of a weekly/monthly **budget**.
-- **Overview** — a glanceable dashboard: this week's time/cost/sessions, the recap, budget & forecast, and a 30-day activity heatmap.
-- **Analytics** — the deep dive (range selector 1D/7D/1M/3M): per-project history chart, projects-by-time, **spend-by-model**, efficiency & trends, top-sessions leaderboard, MCP usage, **Compare**, and **CSV export**.
+### 🚀 Launch anything
+- **Open in Claude** — a terminal already in the project, running `claude`. Cross-platform: Windows Terminal, macOS Terminal/iTerm, every common Linux terminal. Per-launch model overrides (Opus / Sonnet / Haiku).
+- **Launch the app or website inside any project** — anything with an `index.html` (served by a built-in local server) or a `dev`/`start`/`serve` script (spawned with automatic localhost-URL capture) gets a Launch button. Detection walks the whole project tree. Opens in an in-app preview window with reload + browser pop-out.
+- **Share a running preview with a client** — one click opens a Cloudflare quick tunnel: a public https link + QR code they can open on a phone. The link dies when you stop the preview.
+- **Quick tasks** — dispatch a headless `claude -p` task into any project from its card ("fix the mobile nav overlap"). A tasks strip tracks progress; desktop ping on completion.
+- **Resume or branch any past session**, create projects from the app, open in editor or file explorer.
 
-<div align="center"><img src="docs/feat-overview.png" width="820" alt="Overview — budgets, forecast, spend by model, history" /></div>
+### 🔍 Search everything
+- **One search across projects, conversations, and Claude's memory** — word-AND matching, so any description finds the thing ("roofing client site" matches even when those words never sit together).
+- **Project results pull the project right up** — open it in Claude or jump to its details from the result row.
+- **Suggested searches mined from your usage** — recurring session themes, recent projects, most-edited files, top tools. The empty search tab recommends what you were probably about to type.
+- **In-app transcript viewer** — read any conversation as a clean chat, then Resume or Branch it (`--resume … --fork-session`, original untouched).
 
-- **Project detail** — per-day time/cost charts, token breakdown, tool-usage bars, most-edited files, and a session list.
+### 📊 Analytics & money
+- **Per-project time, cost, tokens, tools, files, and models** — live-updating cards with sparklines, a live "● active" dot, git status, and a deep-dive detail view with per-day charts.
+- **Recap** — what you did today or this week across every project, with an optional AI-written narrative.
+- **Spend by model, MCP usage, busiest-hours heatmap, project compare, CSV export.**
+- **Budgets** — weekly/monthly limits with 80% and 100% notifications. Costs are honest estimates from token usage (subscriptions aren't billed per token); an optional org Admin API key pulls your actual billed numbers.
 
-<div align="center"><img src="docs/feat-detail.png" width="820" alt="Project detail — charts, tokens, tools, models" /></div>
+### 👥 Clients & Partners
+- **Clients** — assign any project to a client; hours and estimated cost roll up per client per month, exportable to CSV for billing.
+- **Partners** — share a project and your partner receives the files **and your Claude context** on their machine via a partner code. Both sides auto-sync continuously through a private GitHub repo: save a file here, it appears there. Everything syncs — including `.env` files — and conflicts pause sync with a notification instead of clobbering anyone's work.
+- **Pipeline self-test** — dry-runs the entire sharing chain with a dummy project (tooling, local engine, real private repo, partner code, clone-back, two-way sync) and logs every step before you share anything real.
 
-### 🔎 Search & read
-- **Unified search** across every conversation **and** your saved context/memory — highlighted snippets, filter by project / date / role.
-- **In-app transcript viewer** — read the full conversation as a clean chat; jump straight from a search hit to the exact message.
-- **Branch a conversation** — fork any past session into a new Claude Code session (`--resume … --fork-session`) straight from the transcript or a session row. The original stays untouched, so you can explore a different direction without losing your thread.
+### 🤖 Agent maker
+- Build Claude Code **subagents in-app** — global (`~/.claude/agents`) or per-project, with tool pickers, model selection, and optional AI-drafted system prompts. They appear in Claude Code automatically.
 
-<div align="center"><img src="docs/feat-search.png" width="820" alt="Search across conversations and context" /></div>
+### 🧠 Context & account
+- **Context tab** — what Claude remembers about you and your projects (memory files + global `CLAUDE.md`), grouped and searchable.
+- **Claude account & plan** — your real signed-in plan (e.g. Claude Max 20×), read locally from Claude Code's own session. Your login token is never read or transmitted.
 
-### 🧠 Context
-- See **what Claude remembers about you** — your memory files and global `CLAUDE.md`, grouped into About you / Preferences / Projects / References.
+### 🎨 Personalization
+- **8 gradient accent themes** — Clay, Lagoon, Aubergine, Jade, Sunset, Cobalt, Ember, Mist — each with a signature gradient painted across the whole UI, layered on light or dark.
+- **Floating glass dashboard** — translucent panels over accent washes; content floats instead of sitting in boxes. (The burst logo stays Claude-orange in every theme.)
+- **Global summon hotkey**, redact mode for screen-sharing, launch-at-login with start-hidden, ⌘K command palette.
 
-<div align="center"><img src="docs/feat-context.png" width="820" alt="Context — what Claude remembers about you" /></div>
+### 🔁 Automation & updates
+- **Routines** — recurring headless Claude tasks on a schedule (daily standup digest, repo health sweep), safe read-only by default with an opt-in autonomous mode.
+- **Silent self-updates on Windows** — Chrome-style: new versions download in the tray and install themselves while the app is idle. Toggle in Settings.
 
-### 🔁 Routines
-- **Recurring Claude Code tasks on a schedule.** Each routine runs `claude -p "<your prompt>"` in a project (every N hours or daily at a time) and shows the result right in the app — a daily standup digest, a weekly retro, a README freshness check, a test/health sweep.
-- Runs in **safe read-only mode by default**; an optional "autonomous" toggle (`--permission-mode acceptEdits`) lets a routine make changes. Per-routine model, enable/disable, and **Run now**.
+## Privacy
 
-<div align="center"><img src="docs/feat-routines.png" width="820" alt="Routines — recurring claude -p tasks" /></div>
+Everything is local. Claude Helm reads `~/.claude` on your machine; transcripts never leave it. No telemetry, no account. Optional API keys are encrypted with your OS keychain. The only network calls are the ones you ask for: update checks against GitHub Releases, optional AI summaries, preview-share tunnels, and partner-project git sync.
 
-### 🎛 Organize & polish
-- **Tags** (client / personal / …) with a tag filter, **archive** to hide projects, **pin** favorites.
-- **Dark mode**, first-run onboarding, and a privacy-first, **100% local** design — nothing leaves your machine (the only optional network call is AI summaries, if you add your own API key).
-
----
-
-## 🔜 Coming soon
-
-- **Code-signing** (removes the one-time "unidentified developer" prompts and enables macOS auto-update).
-
----
-
-## How it works
-
-- All paths are derived from your home directory at runtime, so it works for **whoever installs it**.
-- It reads `~/.claude/projects/**.jsonl` (your Claude Code session transcripts) to compute stats, and your memory folder + `~/.claude/CLAUDE.md` for the Context view.
-- Cost is an **estimate** (tokens × public Claude pricing), labeled as such.
-- **No telemetry. No account. No data leaves your machine.**
-
-## Build from source
+## Develop
 
 ```bash
+git clone https://github.com/trifactorscalingllc/claude-helm
+cd claude-helm
 npm install
-npm start        # run in dev
-npm run dist     # build the Windows installer into dist/
+npm start        # dev (close the installed app first — single-instance lock)
+npm test         # launch-preview + partner-sync test suites
+npm run dist     # Windows installer
+npm run dist:mac # macOS dmg + zip (on a Mac; CI builds all platforms on every tag)
 ```
+
+Releases: bump `version` in package.json → create a `v*` release/tag → CI builds Windows, macOS, and Linux and attaches them — that same release is the auto-update feed.
 
 ## License
 
-MIT
+MIT © TriFactor Scaling
