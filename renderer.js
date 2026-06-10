@@ -852,11 +852,9 @@ function render() {
   $('externalCount').textContent = extList.length;
   extList.forEach((p) => { const el = makeResumeRow(p); cardEls.set(p.path, el); extGrid.appendChild(el); });
 
-  renderHomeRecap();
 }
 
-// Recap moved here from the (deleted) Overview tab — a quiet "what you did" panel
-// below the resume list, not competing with the launcher.
+// Recap lives at the top of Analytics — the reporting tab — not on the launcher home.
 function renderHomeRecap() {
   const host = $('recapHome');
   if (!host) return;
@@ -1304,11 +1302,35 @@ function loadSearch() {
       }));
   }
   setTimeout(() => input.focus(), 50);
+  if (input.value.trim().length < 2) renderSearchSuggestions();
 }
+// Empty search box → recommend searches mined from the user's own usage.
+async function renderSearchSuggestions() {
+  const body = $('search-body');
+  body.innerHTML = '<p class="empty">Search across every project, conversation, and memory…</p>';
+  let s;
+  try { s = await window.launcher.searchSuggestions(); } catch { return; }
+  if (!s || (!s.topics.length && !s.recent.length && !s.files.length)) return;
+  if ($('searchInput').value.trim().length >= 2) return; // user typed while we mined
+  const group = (label, items, icon) => items.length
+    ? `<div class="sug-group"><span class="sug-label">${svg(icon, 12)} ${label}</span>${items.map((t) => `<button class="sug-chip" data-q="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}</div>` : '';
+  body.innerHTML = `<div class="sug-wrap">
+      <p class="sug-head">Suggested searches — mined from your recent work</p>
+      ${group('Themes in your sessions', s.topics, 'bulb')}
+      ${group('Recent projects', s.recent, 'grid')}
+      ${group('Most-edited files', s.files, 'file')}
+      ${group('Tools you use most', s.tools, 'terminal')}
+    </div>`;
+  body.querySelectorAll('.sug-chip').forEach((b) => b.addEventListener('click', () => {
+    $('searchInput').value = b.dataset.q;
+    runSearch(b.dataset.q);
+  }));
+}
+
 async function runSearch(q) {
   const body = $('search-body');
   if (q.length < 2) {
-    body.innerHTML = '<p class="empty">Type at least 2 characters to search your Claude history.</p>';
+    renderSearchSuggestions();
     return;
   }
   body.innerHTML = '<p class="empty">Searching…</p>';
@@ -2003,6 +2025,7 @@ async function loadOverview() {
 // efficiency/trends, top sessions, MCP usage.
 async function loadAnalytics(days) {
   overviewDays = days || overviewDays || 7;
+  renderHomeRecap();
   document.querySelectorAll('#rangeToggle button').forEach((b) =>
     b.classList.toggle('active', Number(b.dataset.days) === overviewDays));
 
@@ -2303,7 +2326,7 @@ function eventToAccelerator(e) {
   return [...mods, key].join('+');
 }
 
-const ACCENTS = ['clay', 'lagoon', 'aubergine', 'jade'];
+const ACCENTS = ['clay', 'lagoon', 'aubergine', 'jade', 'sunset', 'cobalt', 'ember', 'mist'];
 function applyAccent(accent) {
   const a = ACCENTS.includes(accent) ? accent : 'clay';
   // 'clay' is the default :root palette — no attribute needed.
@@ -2634,6 +2657,13 @@ async function init() {
     else if (state === 'error') { toast.classList.add('hidden'); if (checkedManually && ustate) ustate.textContent = "Couldn't check right now — try again shortly."; checkedManually = false; }
   });
 
+  // context rescue finished → flip the guard card to "start fresh"
+  window.launcher.onRescueDone(({ sessionId, ok }) => {
+    rescueState.set(sessionId, ok ? 'done' : undefined);
+    if (!ok) rescueState.delete(sessionId);
+    sampleActiveUsage(); // re-render the guard card promptly
+  });
+
   // quick-task + partner live updates
   window.launcher.onTasksUpdated(() => renderTasksStrip());
   window.launcher.onPartnersUpdated(() => { if (!$('view-clients').classList.contains('hidden')) loadPartners(); });
@@ -2772,7 +2802,54 @@ async function sampleActiveUsage() {
   el.querySelectorAll('.amb-other').forEach((node) => {
     node.addEventListener('click', () => openRow(otherSessions[Number(node.dataset.i)]));
   });
+  renderContextGuard(list);
   refreshLiveMetrics(); // keep the live rows' dot + last-active current
+}
+
+// ---------- context guard ----------
+// When a live session's context window is nearly full, most users don't know it's a
+// problem (Claude starts forgetting at 100%) or what to do about it. This card explains
+// it in plain words and offers a one-click rescue: a fork of the conversation (full
+// memory intact) writes HANDOFF.md, then a fresh session picks it up — nothing lost.
+const CTX_GUARD_PCT = 85;
+const rescueState = new Map(); // sessionId -> 'running' | 'done'
+function renderContextGuard(list) {
+  const host = $('ctxGuard');
+  if (!host) return;
+  const hot = (list || []).filter((s) => s.contextTokens && Math.round(s.contextTokens / 200000 * 100) >= CTX_GUARD_PCT);
+  // keep showing sessions we just rescued (state 'done') even if they dropped off the hot list
+  const showing = hot.length || [...rescueState.values()].includes('done');
+  if (!showing) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+  host.classList.remove('hidden');
+  const rows = hot.map((s, i) => {
+    const pct = Math.min(100, Math.round(s.contextTokens / 200000 * 100));
+    const st = rescueState.get(s.sessionId);
+    const action = st === 'running'
+      ? `<span class="cg-working"><span class="ts-spin"></span> Saving everything to HANDOFF.md…</span>`
+      : st === 'done'
+        ? `<button class="btn primary btn-xs cg-fresh" data-i="${i}">${svg('bolt', 13)} Start fresh session (reads the handoff)</button>`
+        : `<button class="btn primary btn-xs cg-rescue" data-i="${i}">${svg('drive', 13)} Rescue context now</button>`;
+    return `<div class="cg-row">
+      <span class="cg-pct ${pct >= 95 ? 'crit' : ''}">${pct}%</span>
+      <span class="cg-text"><strong>${escapeHtml(s.name)}</strong> — this conversation's memory is ${pct >= 95 ? 'almost completely' : 'nearly'} full. At 100% Claude compresses the chat and details get lost.</span>
+      ${action}
+    </div>`;
+  }).join('');
+  host.innerHTML = `<div class="ctx-guard">${rows}</div>`;
+  host.querySelectorAll('.cg-rescue').forEach((b) => b.addEventListener('click', async () => {
+    const s = hot[Number(b.dataset.i)];
+    const r = await window.launcher.rescueContext(s.path, s.sessionId);
+    if (r && r.ok) { rescueState.set(s.sessionId, 'running'); showStatus(`Rescuing ${s.name}'s context — a full handoff is being written…`, 'ok'); }
+    else showStatus((r && r.error) || 'Could not start the rescue.', 'warn');
+    renderContextGuard(list);
+  }));
+  host.querySelectorAll('.cg-fresh').forEach((b) => b.addEventListener('click', async () => {
+    const s = hot[Number(b.dataset.i)];
+    rescueState.delete(s.sessionId);
+    const r = await window.launcher.resumeFromHandoff(s.path);
+    if (r && r.ok) showStatus('Fresh session opening — it starts by reading HANDOFF.md.', 'ok');
+    renderContextGuard(list);
+  }));
 }
 
 init();

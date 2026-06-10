@@ -1433,6 +1433,55 @@ ipcMain.handle('partner-self-test', async () => {
 });
 ipcMain.handle('partner-autosync', (_e, { projectPath, on }) => partner.setAutoSync(projectPath, on));
 
+// ---- context guard: rescue a nearly-full session so nothing is lost ----
+// Forks the live conversation headlessly (--resume <id> --fork-session -p) — the fork
+// carries the FULL context — and has it write HANDOFF.md in the project. The original
+// session is untouched. Afterwards the user starts a fresh session that reads the file.
+const rescuesRunning = new Set();
+const HANDOFF_PROMPT = 'IMPORTANT: this conversation is nearly out of context. Write a file named HANDOFF.md in the project root containing a complete handoff of this session: what we are working on and why, every decision made so far, the current state of each file we touched, exactly what remains to be done as a checklist, and any gotchas the next session must know. Be specific and complete - the next Claude session will rely on this file alone. Write ONLY the file, then reply with one line confirming it was written.';
+
+ipcMain.handle('rescue-context', (_e, { cwd, sessionId }) => {
+  try {
+    if (!cwd || !SESSION_ID_RE.test(String(sessionId || ''))) return { ok: false, error: 'Invalid session.' };
+    if (rescuesRunning.has(sessionId)) return { ok: false, error: 'Already rescuing this session.' };
+    rescuesRunning.add(sessionId);
+    const bin = resolveClaudeBin();
+    const args = ['-p', HANDOFF_PROMPT, '--resume', sessionId, '--fork-session', '--permission-mode', 'acceptEdits'];
+    let child;
+    try {
+      child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (e) {
+      rescuesRunning.delete(sessionId);
+      return { ok: false, error: friendlyRoutineErr(e.message) };
+    }
+    let err = '';
+    if (child.stderr) child.stderr.on('data', (d) => { err += d; });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} }, 5 * 60 * 1000);
+    child.on('error', () => { clearTimeout(timer); rescuesRunning.delete(sessionId); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      rescuesRunning.delete(sessionId);
+      const ok = code === 0 && fs.existsSync(path.join(cwd, 'HANDOFF.md'));
+      const name = cwd.split(/[\\/]/).pop();
+      notify(ok ? `Context rescued — ${name}` : `Context rescue failed — ${name}`,
+        ok ? 'HANDOFF.md saved. Start a fresh session from the dashboard whenever you like.' : (err.trim().slice(0, 140) || 'The handoff could not be written.'));
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('rescue-done', { sessionId, ok });
+    });
+    return { ok: true, started: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// Open a brand-new session that starts by reading the handoff (fresh 200K context).
+ipcMain.handle('resume-from-handoff', (_e, cwd) => {
+  try {
+    const cfg = loadConfig();
+    if (cfg.autoTrust) trustProject(cwd);
+    const cmd = buildClaudeCommand({ ...cfg.launch, continue: false })
+      + " 'Read HANDOFF.md in this project and continue exactly where the previous session left off.'";
+    return spawnTerminal(cwd, cmd, cfg.terminalCommand);
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('run-quick-task', (_e, args) => {
   try { return runQuickTask(args || {}); } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -1631,6 +1680,48 @@ async function searchMemory(q) {
   } catch {}
   return out;
 }
+
+// Suggested searches, mined from YOUR usage: keywords from recent session titles,
+// your most-edited files, top tools, and active project names — so the Search tab
+// recommends what you were probably about to type anyway.
+const SUGGEST_STOP = new Set(('the and for with from into your this that what when where how why are was were have has had will would can could should '
+  + 'add fix update create make setup set get use new more all about over under out not you our their them they its it\'s a an of in on at to by is be '
+  + 'project projects claude code session work file files using based').split(' '));
+ipcMain.handle('search-suggestions', () => {
+  try {
+    const list = indexer.projectsList().sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0)).slice(0, 12);
+    const wordCount = new Map(); // keyword -> {n, lastTs}
+    const toolCount = new Map();
+    const fileCount = new Map();
+    for (const p of list) {
+      const m = indexer.metricsFor(p.path);
+      if (!m) continue;
+      const sessions = Object.values(m.sessions || {}).sort((a, b) => b.lastTs - a.lastTs).slice(0, 10);
+      for (const s of sessions) {
+        for (const raw of String(s.title || '').toLowerCase().split(/[^a-z0-9-]+/)) {
+          if (raw.length < 4 || SUGGEST_STOP.has(raw) || /^\d+$/.test(raw)) continue;
+          const e = wordCount.get(raw) || { n: 0, lastTs: 0 };
+          e.n++; e.lastTs = Math.max(e.lastTs, s.lastTs || 0);
+          wordCount.set(raw, e);
+        }
+      }
+      const t = m.totals || {};
+      for (const [name, c] of Object.entries(t.tools || {})) toolCount.set(name, (toolCount.get(name) || 0) + c);
+      for (const [f, c] of Object.entries(t.files || {})) {
+        const base = f.split(/[\\/]/).pop();
+        if (base) fileCount.set(base, (fileCount.get(base) || 0) + c);
+      }
+    }
+    const topics = [...wordCount.entries()]
+      .filter(([, v]) => v.n >= 2) // a word that recurs across sessions is a real theme
+      .sort((a, b) => (b[1].n - a[1].n) || (b[1].lastTs - a[1].lastTs))
+      .slice(0, 8).map(([w]) => w);
+    const files = [...fileCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([f]) => f);
+    const tools = [...toolCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t2]) => t2);
+    const recent = list.slice(0, 4).map((p) => p.name);
+    return { topics, files, tools, recent };
+  } catch { return { topics: [], files: [], tools: [], recent: [] }; }
+});
 
 // Search projects by ANY description: name, tag, client, your notes, README first
 // paragraph, and recent session titles. Word-AND matching — every word in the query

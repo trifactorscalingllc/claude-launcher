@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('launcher', {
   openMemoryFolder: () => ipcRenderer.invoke('open-memory-folder'),
   searchTranscripts: (query, filters) => ipcRenderer.invoke('search-transcripts', query, filters),
   searchProjects: (query, list) => ipcRenderer.invoke('search-projects', query, list),
+  searchSuggestions: () => ipcRenderer.invoke('search-suggestions'),
+  rescueContext: (cwd, sessionId) => ipcRenderer.invoke('rescue-context', { cwd, sessionId }),
+  resumeFromHandoff: (cwd) => ipcRenderer.invoke('resume-from-handoff', cwd),
+  onRescueDone: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('rescue-done', h);
+    return () => ipcRenderer.removeListener('rescue-done', h);
+  },
   readTranscript: (args) => ipcRenderer.invoke('read-transcript', args),
   branchSession: (cwd, sessionId) => ipcRenderer.invoke('branch-session', cwd, sessionId),
   resumeSession: (cwd, sessionId) => ipcRenderer.invoke('resume-session', cwd, sessionId),
