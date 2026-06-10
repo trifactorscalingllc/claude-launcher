@@ -644,8 +644,17 @@ function performInstall() {
     let launched = false;
     try {
       const bat = path.join(app.getPath('temp'), 'claude-helm-update.cmd');
+      // Wait for the app to ACTUALLY exit before running the installer — a fixed
+      // 4s delay lost the race on the 1.15.0 rollout (teardown took 14s+, NSIS hit
+      // "failed to uninstall" against the live exe and aborted silently). Poll up
+      // to ~60s for zero processes, then a 4s grace for Defender to drop handles.
       fs.writeFileSync(bat, [
         '@echo off',
+        'for /L %%w in (1,1,30) do (',
+        `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul || goto install`,
+        '  ping -n 3 127.0.0.1 >nul',
+        ')',
+        ':install',
         'ping -n 5 127.0.0.1 >nul',
         `"${installer}" /S`,
         'for /L %%i in (1,1,12) do (',
@@ -831,8 +840,28 @@ app.on('before-quit', () => {
       const installer = findPendingInstaller();
       if (installer) {
         installInitiated = true;
-        spawn(process.env.ComSpec || 'cmd.exe', ['/c', `ping -n 5 127.0.0.1 >nul & "${installer}" /S`],
-          { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+        // Same wait-for-exit guard as performInstall: don't run NSIS while our
+        // own (exiting) processes still hold the exe.
+        const exeName = path.basename(process.execPath);
+        const bat = path.join(app.getPath('temp'), 'claude-helm-quit-install.cmd');
+        try {
+          fs.writeFileSync(bat, [
+            '@echo off',
+            'for /L %%w in (1,1,30) do (',
+            `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul || goto install`,
+            '  ping -n 3 127.0.0.1 >nul',
+            ')',
+            ':install',
+            'ping -n 5 127.0.0.1 >nul',
+            `"${installer}" /S`,
+            '',
+          ].join('\r\n'));
+          spawn(process.env.ComSpec || 'cmd.exe', ['/c', `"${bat}"`],
+            { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+        } catch {
+          spawn(process.env.ComSpec || 'cmd.exe', ['/c', `ping -n 5 127.0.0.1 >nul & "${installer}" /S`],
+            { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+        }
       }
     }
   } catch {}
