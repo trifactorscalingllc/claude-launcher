@@ -1,6 +1,6 @@
 {
   "name": "claude-launcher",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "description": "Claude Helm — monitor and open all your Claude Code projects",
   "main": "main.js",
   "author": "biery",
@@ -89,7 +89,8 @@
   },
   "devDependencies": {
     "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "png2icons": "^2.0.1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
