@@ -648,17 +648,23 @@ function performInstall() {
       // 4s delay lost the race on the 1.15.0 rollout (teardown took 14s+, NSIS hit
       // "failed to uninstall" against the live exe and aborted silently). Poll up
       // to ~60s for zero processes, then a 4s grace for Defender to drop handles.
+      // The process check goes through a temp FILE, never a pipe: on the 1.15.1
+      // rollout `tasklist | find` hung forever (find.exe blocked 8+ min reading
+      // the pipe), so the batch never reached a single relaunch attempt.
+      const tl = path.join(app.getPath('temp'), 'claude-helm-tasklist.txt');
       fs.writeFileSync(bat, [
         '@echo off',
         'for /L %%w in (1,1,30) do (',
-        `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul || goto install`,
+        `  tasklist /FI "IMAGENAME eq ${exeName}" /NH >"${tl}" 2>nul`,
+        `  find /I "${exeName}" "${tl}" >nul 2>nul || goto install`,
         '  ping -n 3 127.0.0.1 >nul',
         ')',
         ':install',
         'ping -n 5 127.0.0.1 >nul',
         `"${installer}" /S`,
         'for /L %%i in (1,1,12) do (',
-        `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul && exit /b 0`,
+        `  tasklist /FI "IMAGENAME eq ${exeName}" /NH >"${tl}" 2>nul`,
+        `  find /I "${exeName}" "${tl}" >nul 2>nul && exit /b 0`,
         `  start "" "${exe}"`,
         '  ping -n 11 127.0.0.1 >nul',
         ')',
@@ -841,14 +847,17 @@ app.on('before-quit', () => {
       if (installer) {
         installInitiated = true;
         // Same wait-for-exit guard as performInstall: don't run NSIS while our
-        // own (exiting) processes still hold the exe.
+        // own (exiting) processes still hold the exe. File-based check, not a
+        // pipe — `tasklist | find` hung forever on the 1.15.1 rollout.
         const exeName = path.basename(process.execPath);
         const bat = path.join(app.getPath('temp'), 'claude-helm-quit-install.cmd');
+        const tl = path.join(app.getPath('temp'), 'claude-helm-tasklist-quit.txt');
         try {
           fs.writeFileSync(bat, [
             '@echo off',
             'for /L %%w in (1,1,30) do (',
-            `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul || goto install`,
+            `  tasklist /FI "IMAGENAME eq ${exeName}" /NH >"${tl}" 2>nul`,
+            `  find /I "${exeName}" "${tl}" >nul 2>nul || goto install`,
             '  ping -n 3 127.0.0.1 >nul',
             ')',
             ':install',
