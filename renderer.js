@@ -2603,8 +2603,10 @@ async function init() {
   const ustate = $('updateState');      // Settings → About panel
   const ubanner = $('updateBanner');    // unmissable top-of-window bar
   const ubMsg = $('updateBannerMsg');
-  function showUpdateBanner(version) {
-    if (ubMsg) ubMsg.textContent = `Claude Helm v${version} is ready — restart to finish updating.`;
+  function showUpdateBanner(version, manual) {
+    if (ubMsg) ubMsg.textContent = manual
+      ? `Claude Helm v${version} is out — macOS can't auto-install unsigned builds, so this opens the download (drag to Applications to update).`
+      : `Claude Helm v${version} is ready — restart to finish updating.`;
     if (ubanner) ubanner.classList.remove('hidden');
     document.body.classList.add('has-update-banner');
   }
@@ -2627,7 +2629,7 @@ async function init() {
     if (state === 'checking') { if (checkedManually && ustate) ustate.textContent = 'Checking for updates…'; }
     else if (state === 'available') { umsg.textContent = `Downloading update v${info.version}…`; toast.classList.remove('hidden'); uinstall.classList.add('hidden'); if (ustate) ustate.textContent = `Update v${info.version} found — downloading…`; }
     else if (state === 'downloading') { umsg.textContent = `Downloading update… ${info.percent}%`; toast.classList.remove('hidden'); if (ustate) ustate.textContent = `Downloading update… ${info.percent}%`; }
-    else if (state === 'ready') { toast.classList.add('hidden'); showUpdateBanner(info.version); if (ustate) ustate.textContent = `Update v${info.version} ready — restart to apply.`; }
+    else if (state === 'ready') { toast.classList.add('hidden'); showUpdateBanner(info.version, info.manual); if (ustate) ustate.textContent = info.manual ? `v${info.version} is out — download the new dmg to update (unsigned Mac builds can't auto-install).` : `Update v${info.version} ready — restart to apply.`; }
     else if (state === 'current') { hideUpdateBanner(); if (checkedManually && ustate) ustate.textContent = "You're on the latest version."; checkedManually = false; }
     else if (state === 'error') { toast.classList.add('hidden'); if (checkedManually && ustate) ustate.textContent = "Couldn't check right now — try again shortly."; checkedManually = false; }
   });

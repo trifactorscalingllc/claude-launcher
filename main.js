@@ -547,7 +547,14 @@ function setupAutoUpdate() {
   autoUpdater.on('update-available', (info) => sendUpdate('available', { version: info.version }));
   autoUpdater.on('update-not-available', () => sendUpdate('current'));
   autoUpdater.on('download-progress', (p) => sendUpdate('downloading', { percent: Math.round(p.percent) }));
-  autoUpdater.on('update-downloaded', (info) => { sendUpdate('ready', { version: info.version }); maybeSilentInstall(info); });
+  // macOS: Squirrel.Mac silently refuses to install updates into an UNSIGNED app —
+  // the app restarts on the old version with no error (verified live on the Mac).
+  // Until the build is signed/notarized, be honest: hand Mac users the dmg instead.
+  const MAC_MANUAL = process.platform === 'darwin';
+  autoUpdater.on('update-downloaded', (info) => {
+    sendUpdate('ready', { version: info.version, manual: MAC_MANUAL });
+    if (!MAC_MANUAL) maybeSilentInstall(info);
+  });
   autoUpdater.on('error', (err) => sendUpdate('error', { message: String(err && err.message || err) }));
   // only check when packaged (dev builds have no update feed)
   if (app.isPackaged) {
@@ -590,6 +597,12 @@ function findPendingInstaller() {
 
 ipcMain.handle('install-update', () => {
   try {
+    // macOS unsigned: quitAndInstall silently restarts the OLD version (Squirrel.Mac
+    // signature check). Send the user to the dmg instead of pretending.
+    if (process.platform === 'darwin') {
+      shell.openExternal('https://github.com/trifactorscalingllc/claude-helm/releases/latest');
+      return;
+    }
     app.isQuitting = true;
     const exe = process.execPath;
     const installer = process.platform === 'win32' ? findPendingInstaller() : '';
