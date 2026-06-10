@@ -5,7 +5,15 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src *;" />
   <title>Preview</title>
   <style>
-    :root { color-scheme: light dark; }
+    /* accent gradients mirror the Helm presets (styles.css); ?accent= picks one */
+    :root { color-scheme: light dark; --grad-from: #e0825c; --grad-to: #bd4f2e; }
+    [data-accent="lagoon"]    { --grad-from: #36a0ae; --grad-to: #1d5f93; }
+    [data-accent="aubergine"] { --grad-from: #8d59a0; --grad-to: #a8447a; }
+    [data-accent="jade"]      { --grad-from: #3aa46a; --grad-to: #1f7e88; }
+    [data-accent="sunset"]    { --grad-from: #d92b35; --grad-to: #ef6238; }
+    [data-accent="cobalt"]    { --grad-from: #3a6cf0; --grad-to: #2742c8; }
+    [data-accent="ember"]     { --grad-from: #e07818; --grad-to: #c03d12; }
+    [data-accent="mist"]      { --grad-from: #6488ab; --grad-to: #3a5d80; }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; }
     body { display: flex; flex-direction: column; background: #1c1b18; }
@@ -26,7 +34,20 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       padding: 0 6px; font-family: "SFMono-Regular", Consolas, monospace;
     }
-    .pop { font-size: 11px; font-weight: 600; gap: 5px; width: auto; padding: 0 10px; }
+    /* same family as the Helm nav tabs: accent gradient pill, white text.
+       Scoped as .bar .pop — must outrank the generic .bar button rules above. */
+    .bar .pop {
+      width: auto; height: 28px; padding: 0 12px;
+      font-size: 12px; font-weight: 600; gap: 5px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--grad-from), var(--grad-to));
+      color: #fff;
+    }
+    .bar .pop:hover {
+      background: linear-gradient(135deg, var(--grad-from), var(--grad-to));
+      color: #fff;
+      filter: brightness(0.92) saturate(1.08);
+    }
     webview { flex: 1 1 auto; width: 100%; border: none; background: #fff; }
   </style>
 </head>

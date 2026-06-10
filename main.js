@@ -560,7 +560,10 @@ function openPreviewWindow(projectPath, url, name) {
     },
   });
   win.removeMenu();
-  win.loadFile('preview-shell.html', { query: { url, name } });
+  // the shell tints its "Open in browser" button with the Helm accent
+  let accent = 'clay';
+  try { accent = loadConfig().accent || 'clay'; } catch {}
+  win.loadFile('preview-shell.html', { query: { url, name, accent } });
   win.on('closed', () => { previewWindows.delete(projectPath); });
   previewWindows.set(projectPath, win);
 }
@@ -1429,11 +1432,21 @@ ipcMain.handle('preview-scan', (_e, paths) => {
 ipcMain.handle('preview-detect', (_e, projectPath) => {
   try { return preview.detect(projectPath); } catch (err) { return { launchable: false, error: err.message }; }
 });
+// every launchable file/app in one project — feeds the row's launchables subtree
+ipcMain.handle('preview-scan-files', (_e, projectPath) => {
+  try {
+    return preview.detectAll(projectPath).map((i) => ({ id: i.id, kind: i.kind, label: i.label, command: i.command || '' }));
+  } catch { return []; }
+});
 ipcMain.handle('preview-state', () => preview.snapshot());
-ipcMain.handle('preview-launch', async (_e, projectPath, name) => {
+ipcMain.handle('preview-launch', async (_e, projectPath, name, entryId) => {
   try {
     const cfg = loadConfig();
-    const r = await preview.launch(projectPath, name || path.basename(projectPath), cfg.previewTarget || 'window');
+    const prev = preview.get(projectPath);
+    const r = await preview.launch(projectPath, name || path.basename(projectPath), cfg.previewTarget || 'window', entryId || '');
+    // a swap (was running, didn't come back "already") killed the old port —
+    // an active share tunnel would point at nothing, so tear it down too
+    if (r && r.ok && !r.already && prev) share.stop(projectPath);
     // static previews resolve with their URL synchronously — open immediately
     if (r.ok && r.already && r.url) {
       if ((cfg.previewTarget || 'window') === 'browser') shell.openExternal(r.url);

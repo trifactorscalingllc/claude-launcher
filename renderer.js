@@ -258,18 +258,21 @@ async function openRow(p) {
 // ---------- live preview (Launch a project's app/site) ----------
 async function refreshPreviewData() {
   try {
+    launchFilesCache.clear(); // fresh project listing → rescan launchables on demand
     const paths = [...projects, ...externalProjects].map((p) => p.path);
     previewProfiles = (await window.launcher.previewScan(paths)) || {};
     previewRunning = (await window.launcher.previewState()) || {};
   } catch { previewProfiles = {}; previewRunning = {}; }
 }
 
-// Launch (or focus, if already running) a project's app/site.
-async function launchPreview(p) {
+// Launch (or focus, if already running) a project's app/site. Pass an entryId
+// from the launchables subtree to launch that specific file/app; launching a
+// different entry while one runs swaps the preview over to it.
+async function launchPreview(p, entryId) {
   const run = previewRunning[p.path];
-  if (run && run.url) { await window.launcher.previewOpen(p.path, p.name); return; }
+  if (run && run.url && (!entryId || run.entryId === entryId)) { await window.launcher.previewOpen(p.path, p.name); return; }
   showStatus(`Starting ${p.name}…`, 'ok');
-  const r = await window.launcher.previewLaunch(p.path, p.name);
+  const r = await window.launcher.previewLaunch(p.path, p.name, entryId || '');
   if (!r || !r.ok) { showStatus((r && r.error) || 'Could not launch.', 'warn'); return; }
   if (r.type === 'server' && !r.url) showStatus(`Running ${p.name} — waiting for it to print a URL…`, 'ok');
 }
@@ -435,6 +438,81 @@ function repaintAllPreviewBtns() {
     const p = projects.find((x) => x.path === path) || externalProjects.find((x) => x.path === path);
     if (p) paintPreviewBtn(el.querySelector('.preview-btn'), p);
   });
+  document.querySelectorAll('.rr-sub[data-sub-for]').forEach((sub) => {
+    const path = sub.dataset.subFor;
+    const p = projects.find((x) => x.path === path) || externalProjects.find((x) => x.path === path);
+    if (p) paintLaunchSub(sub, p);
+  });
+}
+
+// ---------- launchables subtree (recent projects only) ----------
+// A project edited or opened in the last 48h gets an open-by-default subtree
+// listing every launchable file/app inside it, each with its own Launch button.
+const RECENT_MS = 48 * 60 * 60 * 1000;
+function isRecentProject(p) { return (Date.now() - (p.mtime || 0)) < RECENT_MS; }
+
+// detectAll is a synchronous fs walk in the main process — cache per project so
+// render() (which fires per search keystroke) and the metrics loop never re-scan.
+// Cleared in refreshPreviewData, which loadProjects runs on every fs change.
+const launchFilesCache = new Map(); // path -> files[] (empty array cached too)
+
+async function ensureLaunchSub(p, rowEl) {
+  if (!rowEl || !rowEl.classList.contains('rrow')) return;
+  const next = rowEl.nextElementSibling;
+  if (next && next.dataset && next.dataset.subFor === p.path) return; // already there
+  let files = launchFilesCache.get(p.path);
+  if (files === undefined) {
+    files = (await window.launcher.previewScanFiles(p.path)) || [];
+    launchFilesCache.set(p.path, files);
+  }
+  if (!rowEl.isConnected || !files.length) return;
+  const dup = rowEl.nextElementSibling; // re-check after the await (rows repaint often)
+  if (dup && dup.dataset && dup.dataset.subFor === p.path) return;
+
+  const sub = document.createElement('div');
+  sub.className = 'rr-sub';
+  sub.dataset.subFor = p.path;
+  sub.innerHTML = `
+    <div class="rr-sub-head"><span class="ico">${svg('chev', 12)}</span> Launchable files <span class="count">${files.length}</span></div>
+    <div class="rr-sub-rows">
+      ${files.map((f) => `
+        <div class="rr-sub-row" data-id="${escapeHtml(f.id)}" data-cmd="${escapeHtml(f.command || '')}">
+          ${svg(f.kind === 'server' ? 'bolt' : 'file', 13)}
+          <span class="rr-sub-name" title="${escapeHtml(f.command || f.id)}">${escapeHtml(f.label)}</span>
+          <button class="btn ghost btn-xs sub-launch" data-id="${escapeHtml(f.id)}">${svg('globe', 12)} Launch</button>
+          <button class="icon-btn sub-stop hidden" data-id="${escapeHtml(f.id)}" title="Stop">${svg('stop', 13)}</button>
+        </div>`).join('')}
+    </div>`;
+  sub.querySelector('.rr-sub-head').addEventListener('click', () => sub.classList.toggle('collapsed'));
+  sub.querySelectorAll('.sub-launch').forEach((b) =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); launchPreview(p, b.dataset.id); }));
+  sub.querySelectorAll('.sub-stop').forEach((b) =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); stopPreview(p); }));
+  rowEl.after(sub);
+  paintLaunchSub(sub, p);
+}
+
+// Reflect running state into the subtree: the live entry's button flips to
+// Open (green) and gets a stop ×; everything else stays a plain Launch.
+function paintLaunchSub(sub, p) {
+  const run = previewRunning[p.path];
+  sub.querySelectorAll('.rr-sub-row').forEach((row) => {
+    const mine = !!(run && run.entryId === row.dataset.id);
+    const btn = row.querySelector('.sub-launch');
+    const stopBtn = row.querySelector('.sub-stop');
+    row.classList.toggle('running', mine);
+    if (mine) {
+      const starting = run.status === 'starting';
+      btn.classList.add('running');
+      btn.innerHTML = `${svg(starting ? 'globe' : 'play', 12)} ${starting ? 'Starting…' : 'Open'}`;
+      btn.title = starting ? 'Starting…' : `Open ${run.url} · running`;
+    } else {
+      btn.classList.remove('running');
+      btn.innerHTML = `${svg('globe', 12)} Launch`;
+      btn.title = row.dataset.cmd ? `Launch · ${row.dataset.cmd}` : 'Launch this file';
+    }
+    if (stopBtn) stopBtn.classList.toggle('hidden', !mine);
+  });
 }
 
 function makeResumeRow(p) {
@@ -530,6 +608,8 @@ async function loadMetrics(el, p) {
   const tw = el.querySelector('[data-slot="time-wrap"]'); if (tw) tw.hidden = !(m.activeMs > 0);
   const dot = el.querySelector('[data-slot="active-dot"]'); if (dot) dot.classList.toggle('hidden', !m.active);
   el.classList.toggle('is-active', !!m.active);
+  // "recent" also means opened in Claude recently, even if the folder mtime is older
+  if (m.lastTs && (Date.now() - m.lastTs) < RECENT_MS) ensureLaunchSub(p, el);
 }
 
 async function loadStats(el, p) {
@@ -815,7 +895,10 @@ function render() {
   const resumeList = $('resumeList');
   resumeList.innerHTML = '';
   $('resumeWrap').classList.toggle('hidden', !ranked.length);
-  ranked.forEach((p) => { const el = makeResumeRow(p); cardEls.set(p.path, el); resumeList.appendChild(el); });
+  ranked.forEach((p) => {
+    const el = makeResumeRow(p); cardEls.set(p.path, el); resumeList.appendChild(el);
+    if (isRecentProject(p)) ensureLaunchSub(p, el);
+  });
 
   const empty = $('empty');
   if (rootError) {
@@ -851,7 +934,10 @@ function render() {
   extGrid.innerHTML = '';
   $('externalWrap').classList.toggle('hidden', !extList.length);
   $('externalCount').textContent = extList.length;
-  extList.forEach((p) => { const el = makeResumeRow(p); cardEls.set(p.path, el); extGrid.appendChild(el); });
+  extList.forEach((p) => {
+    const el = makeResumeRow(p); cardEls.set(p.path, el); extGrid.appendChild(el);
+    if (isRecentProject(p)) ensureLaunchSub(p, el);
+  });
 
 }
 
@@ -1425,7 +1511,8 @@ async function runSearch(q) {
 
 // ---------- Context (memory) view ----------
 function escapeHtml(s) {
-  return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  // quotes too — escaped values land inside double-quoted attributes (data-id, title)
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function renderMemBody(body) {
   return escapeHtml(body)

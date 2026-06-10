@@ -75,6 +75,8 @@ async function testNestedDevServer() {
     const res = await get(ev.url);
     check('dev server responds', res.status === 200 && res.body.includes('hello-from-dev-server'), res.body.slice(0, 60));
   }
+  const info = preview.get(proj);
+  check('default server launch carries entryId', !!info && info.entryId === 'app/package.json#dev', info && info.entryId);
   preview.stop(proj);
 }
 
@@ -95,6 +97,91 @@ async function testNotLaunchable() {
   check('not launchable', !d.launchable, JSON.stringify(d));
 }
 
+async function testDetectAllInventory() {
+  console.log('\n[6] detectAll: inventory, skip-dirs, depth cap, BFS order');
+  const proj = path.join(tmp, 'p6');
+  mk('p6/index.html', '<h1>root</h1>');
+  mk('p6/docs/extra.html', '<h1>extra</h1>');
+  mk('p6/app/package.json', JSON.stringify({ scripts: { dev: 'node server.js' } }));
+  mk('p6/tools/package.json', JSON.stringify({ scripts: { build: 'tsc' } }));
+  mk('p6/node_modules/pkg/index.html', '<h1>junk</h1>');
+  mk('p6/.cache/index.html', '<h1>hidden</h1>');
+  mk('p6/a/b/c/d/deep.html', '<h1>too deep</h1>');
+  const ids = preview.detectAll(proj).map((i) => i.id);
+  check('finds root index.html', ids.includes('index.html'), ids.join(' '));
+  check('finds nested html', ids.includes('docs/extra.html'), ids.join(' '));
+  check('finds nested dev script with #script id', ids.includes('app/package.json#dev'), ids.join(' '));
+  check('skips package.json with no dev/start/serve/preview', !ids.includes('tools/package.json#build'), ids.join(' '));
+  check('prunes node_modules + dot-dirs', !ids.some((i) => i.includes('node_modules') || i.includes('.cache')), ids.join(' '));
+  check('respects maxDepth (depth-4 file invisible)', !ids.some((i) => i.endsWith('deep.html')), ids.join(' '));
+  check('BFS: root entry first', ids[0] === 'index.html', ids.join(' '));
+}
+
+async function testDetectAllCaps() {
+  console.log('\n[7] detectAll: maxItems cap and missing folder');
+  const proj = path.join(tmp, 'p7');
+  for (let i = 0; i < 20; i++) mk(`p7/page-${String(i).padStart(2, '0')}.html`, '<h1>x</h1>');
+  check('caps at 12 items', preview.detectAll(proj).length === 12, String(preview.detectAll(proj).length));
+  check('honors a custom cap', preview.detectAll(proj, 3, 5).length === 5);
+  check('nonexistent folder gives []', preview.detectAll(path.join(tmp, 'no-such')).length === 0);
+}
+
+async function testEntryLaunchSwapAndStale() {
+  console.log('\n[8] launch(entryId): exact file, already, swap, stale id');
+  const proj = path.join(tmp, 'p8');
+  mk('p8/one.html', '<h1>page-one</h1>');
+  mk('p8/two.html', '<h1>page-two</h1>');
+  const r1 = await preview.launch(proj, 'p8', 'window', 'two.html');
+  check('entry launch ok, entryId echoed', r1.ok && r1.entryId === 'two.html', JSON.stringify(r1));
+  let res = await get(r1.url);
+  check('serves the chosen file at /', res.status === 200 && res.body.includes('page-two'), res.body.slice(0, 60));
+  const r2 = await preview.launch(proj, 'p8', 'window', 'two.html');
+  check('same entry returns already', r2.ok && r2.already === true, JSON.stringify(r2));
+  const r3 = await preview.launch(proj, 'p8', 'window', '');
+  check('no entryId while running returns already (no restart)', r3.ok && r3.already === true && r3.entryId === 'two.html', JSON.stringify(r3));
+  const r4 = await preview.launch(proj, 'p8', 'window', 'one.html');
+  check('different entry swaps the preview', r4.ok && !r4.already && r4.entryId === 'one.html', JSON.stringify(r4));
+  res = await get(r4.url);
+  check('swapped preview serves the new file', res.status === 200 && res.body.includes('page-one'), res.body.slice(0, 60));
+  check('registry holds exactly one entry for the project', Object.keys(preview.snapshot()).filter((k) => k === proj).length === 1);
+  const r5 = await preview.launch(proj, 'p8', 'window', 'gone.html');
+  check('stale entryId gives friendly error', !r5.ok && /no longer in the project/.test(r5.error || ''), JSON.stringify(r5));
+  const after = preview.get(proj);
+  check('stale entryId did NOT kill the running preview', !!after && after.entryId === 'one.html', JSON.stringify(after));
+  preview.stop(proj);
+}
+
+async function testServerEntryLaunch() {
+  console.log('\n[9] server entry: profileFor server branch boots the right app');
+  const proj = path.join(tmp, 'p9');
+  mk('p9/app/server.js', `
+    const http = require('http');
+    const s = http.createServer((req, res) => res.end('hello-from-entry-server'));
+    s.listen(0, '127.0.0.1', () => console.log('Listening on http://localhost:' + s.address().port + '/'));
+  `);
+  mk('p9/app/package.json', JSON.stringify({ name: 'p9app', scripts: { dev: 'node server.js' } }));
+  const ready = new Promise((resolve) => preview.bus.once('ready', resolve));
+  const r = await preview.launch(proj, 'p9', 'window', 'app/package.json#dev');
+  check('entry server launch starts with entryId', r.ok && r.entryId === 'app/package.json#dev', JSON.stringify(r));
+  const ev = await Promise.race([ready, new Promise((res) => setTimeout(() => res(null), 20000))]);
+  check('entry server URL captured', !!(ev && ev.url), 'no ready event in 20s');
+  if (ev && ev.url) {
+    const res = await get(ev.url);
+    check('entry server responds', res.status === 200 && res.body.includes('hello-from-entry-server'), res.body.slice(0, 60));
+  }
+  preview.stop(proj);
+}
+
+async function testDefaultLaunchCarriesEntryId() {
+  console.log('\n[10] default launch records the id detectAll would give it (idOf)');
+  const proj = path.join(tmp, 'p10');
+  mk('p10/web/index.html', '<h1>p10</h1>');
+  const r = await preview.launch(proj, 'p10', 'window');
+  check('static default launch carries entryId', r.ok && r.entryId === 'web/index.html', JSON.stringify(r));
+  check('entryId matches a detectAll id', preview.detectAll(proj).some((i) => i.id === r.entryId));
+  preview.stop(proj);
+}
+
 (async () => {
   try {
     await testNestedHtmlNoIndex();
@@ -102,6 +189,11 @@ async function testNotLaunchable() {
     await testNestedDevServer();
     await testRootIndexBeatsNestedApp();
     await testNotLaunchable();
+    await testDetectAllInventory();
+    await testDetectAllCaps();
+    await testEntryLaunchSwapAndStale();
+    await testServerEntryLaunch();
+    await testDefaultLaunchCarriesEntryId();
   } catch (e) {
     failures++;
     console.log('  FAIL  unexpected error — ' + e.message);

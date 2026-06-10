@@ -88,8 +88,9 @@ contextBridge.exposeInMainWorld('launcher', {
   // ---- live preview (launch a project's app/site) ----
   previewScan: (paths) => ipcRenderer.invoke('preview-scan', paths),
   previewDetect: (projectPath) => ipcRenderer.invoke('preview-detect', projectPath),
+  previewScanFiles: (projectPath) => ipcRenderer.invoke('preview-scan-files', projectPath),
   previewState: () => ipcRenderer.invoke('preview-state'),
-  previewLaunch: (projectPath, name) => ipcRenderer.invoke('preview-launch', projectPath, name),
+  previewLaunch: (projectPath, name, entryId) => ipcRenderer.invoke('preview-launch', projectPath, name, entryId),
   previewOpen: (projectPath, name) => ipcRenderer.invoke('preview-open', projectPath, name),
   previewStop: (projectPath) => ipcRenderer.invoke('preview-stop', projectPath),
   previewLog: (projectPath) => ipcRenderer.invoke('preview-log', projectPath),

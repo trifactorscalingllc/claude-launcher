@@ -117,6 +117,72 @@ function detect(projectPath) {
   return { launchable: false };
 }
 
+// Every launchable thing in the project, not just the best one — feeds the
+// per-project "launchables" subtree in the projects list. Each item gets a
+// stable id (path relative to the project root) so the renderer can ask to
+// launch that exact file/app later.
+function detectAll(projectPath, maxDepth = 3, maxItems = 12) {
+  const out = [];
+  const queue = [{ dir: projectPath, depth: 0 }];
+  try {
+    while (queue.length && out.length < maxItems) {
+      const { dir, depth } = queue.shift();
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (out.length >= maxItems) break;
+        if (e.isDirectory()) {
+          if (e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue;
+          if (depth < maxDepth) queue.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+          continue;
+        }
+        if (!e.isFile()) continue;
+        const rel = path.relative(projectPath, path.join(dir, e.name)).split(path.sep).join('/');
+        if (e.name === 'package.json') {
+          const pkg = readJSON(path.join(dir, 'package.json'));
+          const scripts = (pkg && pkg.scripts) || {};
+          const scriptName = ['dev', 'start', 'serve', 'preview'].find((s) => scripts[s]);
+          if (scriptName) {
+            const pm = detectPackageManager(dir);
+            const runner = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'bun' ? 'bun run' : 'pnpm';
+            out.push({
+              id: `${rel}#${scriptName}`, kind: 'server',
+              label: dir === projectPath ? `${runner} ${scriptName}` : `${path.dirname(rel)} · ${runner} ${scriptName}`,
+              dir, script: scriptName, command: `${runner} ${scriptName}`,
+            });
+          }
+        } else if (/\.html?$/i.test(e.name)) {
+          out.push({ id: rel, kind: 'static', label: rel, dir, file: e.name });
+        }
+      }
+    }
+  } catch {}
+  return out; // BFS — shallowest (most likely the project's face) first
+}
+
+// Resolve a detectAll() id back to a launch profile. Returns null if the
+// file/script has since disappeared.
+function profileFor(projectPath, entryId) {
+  const it = detectAll(projectPath).find((i) => i.id === entryId);
+  if (!it) return null;
+  if (it.kind === 'server') {
+    return { launchable: true, type: 'server', label: 'Launch app', script: it.script, cwd: it.dir, command: it.command };
+  }
+  return { launchable: true, type: 'static', label: 'Launch site', dir: it.dir, file: it.file };
+}
+
+// The id detect()/profileFor() would give this profile — lets the renderer
+// match a running preview back to its row in the launchables subtree.
+function idOf(projectPath, prof) {
+  try {
+    if (prof.type === 'server') {
+      const rel = path.relative(projectPath, path.join(prof.cwd, 'package.json')).split(path.sep).join('/');
+      return `${rel}#${prof.script}`;
+    }
+    return path.relative(projectPath, path.join(prof.dir, prof.file)).split(path.sep).join('/');
+  } catch { return ''; }
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const s = net.createServer();
@@ -133,6 +199,7 @@ function publicInfo(e) {
   return {
     projectPath: e.projectPath, name: e.name, type: e.type, status: e.status,
     url: e.url || '', port: e.port || 0, startedAt: e.startedAt, command: e.command || '',
+    entryId: e.entryId || '',
   };
 }
 
@@ -157,7 +224,7 @@ function extractUrl(text) {
 }
 
 // ---- static site ----
-async function startStatic(projectPath, name, prof, target) {
+async function startStatic(projectPath, name, prof, target, entryId) {
   const port = await freePort();
   const root = path.resolve(prof.dir);
   const server = http.createServer((req, res) => {
@@ -199,7 +266,7 @@ async function startStatic(projectPath, name, prof, target) {
       const entry = {
         projectPath, name, type: 'static', status: 'running', url, port, server,
         startedAt: Date.now(), logTail: `Serving ${root} on ${url}\n`, target,
-        command: `static · ${path.basename(root)}`,
+        command: `static · ${path.basename(root)}`, entryId,
       };
       running.set(projectPath, entry);
       bus.emit('change');
@@ -210,7 +277,7 @@ async function startStatic(projectPath, name, prof, target) {
 }
 
 // ---- dev server ----
-function startServer(projectPath, name, prof, target) {
+function startServer(projectPath, name, prof, target, entryId) {
   const env = { ...process.env, BROWSER: 'none', FORCE_COLOR: '1', npm_config_yes: 'true' };
   const cwd = prof.cwd || projectPath; // the dev command runs where its package.json lives
   let child;
@@ -227,7 +294,7 @@ function startServer(projectPath, name, prof, target) {
 
   const entry = {
     projectPath, name, type: 'server', status: 'starting', url: '', port: 0, child,
-    startedAt: Date.now(), logTail: `$ ${prof.command}\n`, target, command: prof.command, opened: false,
+    startedAt: Date.now(), logTail: `$ ${prof.command}\n`, target, command: prof.command, opened: false, entryId,
   };
   running.set(projectPath, entry);
   bus.emit('change');
@@ -251,8 +318,12 @@ function startServer(projectPath, name, prof, target) {
   child.on('error', (err) => { appendLog(entry, `\n[error] ${err.message}\n`); });
   child.on('exit', (code) => {
     appendLog(entry, `\n[process exited with code ${code}]\n`);
-    running.delete(projectPath);
-    bus.emit('change');
+    // a swap may have already installed a replacement entry under this path —
+    // only clear the registry if it's still ours, or the new preview goes untracked
+    if (running.get(projectPath) === entry) {
+      running.delete(projectPath);
+      bus.emit('change');
+    }
   });
 
   // If no URL appears within 30s, the app is running but we couldn't detect a URL.
@@ -266,13 +337,21 @@ function startServer(projectPath, name, prof, target) {
   return { ok: true, ...publicInfo(entry) };
 }
 
-async function launch(projectPath, name, target) {
+async function launch(projectPath, name, target, entryId) {
   const existing = running.get(projectPath);
-  if (existing) return { ok: true, already: true, ...publicInfo(existing) };
-  const prof = detect(projectPath);
+  // same entry (or none asked for) → just hand back the running one
+  if (existing && (!entryId || existing.entryId === entryId)) {
+    return { ok: true, already: true, ...publicInfo(existing) };
+  }
+  // resolve the new target BEFORE stopping anything — a stale id must not
+  // kill a healthy running preview just to report an error
+  const prof = entryId ? profileFor(projectPath, entryId) : detect(projectPath);
+  if (!prof) return { ok: false, error: 'That file is no longer in the project.' };
   if (!prof.launchable) return { ok: false, error: 'No app or website detected in this project.' };
-  if (prof.type === 'static') return startStatic(projectPath, name, prof, target);
-  return startServer(projectPath, name, prof, target);
+  if (existing) stop(projectPath); // switching to a different launchable in the same project
+  const id = entryId || idOf(projectPath, prof);
+  if (prof.type === 'static') return startStatic(projectPath, name, prof, target, id);
+  return startServer(projectPath, name, prof, target, id);
 }
 
 function stop(projectPath) {
@@ -300,4 +379,4 @@ function stopAll() {
 function get(projectPath) { return publicInfo(running.get(projectPath)); }
 function logTail(projectPath) { const e = running.get(projectPath); return e ? e.logTail : ''; }
 
-module.exports = { bus, detect, launch, stop, stopAll, snapshot, get, logTail };
+module.exports = { bus, detect, detectAll, launch, stop, stopAll, snapshot, get, logTail };

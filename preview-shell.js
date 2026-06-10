@@ -3,6 +3,9 @@
 const params = new URLSearchParams(location.search);
 const target = params.get('url') || 'about:blank';
 const name = params.get('name') || 'Preview';
+// tint the toolbar's Open-in-browser button with the Helm accent preset
+const accent = params.get('accent');
+if (accent && accent !== 'clay') document.documentElement.setAttribute('data-accent', accent);
 
 const view = document.getElementById('view');
 const urlEl = document.getElementById('url');
