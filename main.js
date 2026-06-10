@@ -445,7 +445,13 @@ function saveConfig(cfg) {
     delete out.apiKey;
     delete out.adminKey;
   }
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(out, null, 2));
+  // Atomic write (temp + rename): a torn write would parse-fail in loadConfig,
+  // which falls back to DEFAULTS — silently wiping partners, tags, keys, and
+  // re-triggering onboarding. partner.js rewrites config every 45s, so the
+  // window is real.
+  const tmp = CONFIG_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(out, null, 2));
+  fs.renameSync(tmp, CONFIG_PATH);
 }
 
 // ---------- window ----------
@@ -615,11 +621,37 @@ function performInstall() {
   // uninstall old application files (2)" dialog is caused by Windows Defender
   // still holding the old exe when NSIS's immediate uninstall runs; giving it
   // a few seconds lets the handle release so the uninstall succeeds cleanly
-  // (no dialog). Then relaunch. Single-instance lock dedupes any double-start.
+  // (no dialog). Then relaunch — via a batch script that waits for the installer
+  // to actually finish and retries the start every ~10s until the app's process
+  // exists (up to ~2 min). Fixed ping delays weren't enough: Defender scans the
+  // 82MB payload, the installer outlived both timed starts, and the app never
+  // came back (seen live on 1.13.1 → 1.14.0). Single-instance lock dedupes any
+  // double-start.
   if (installer) {
-    const cmd = `ping -n 5 127.0.0.1 >nul & "${installer}" /S & ping -n 12 127.0.0.1 >nul & start "" "${exe}" & ping -n 6 127.0.0.1 >nul & start "" "${exe}"`;
-    spawn(process.env.ComSpec || 'cmd.exe', ['/c', cmd],
-      { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+    const exeName = path.basename(exe);
+    let launched = false;
+    try {
+      const bat = path.join(app.getPath('temp'), 'claude-helm-update.cmd');
+      fs.writeFileSync(bat, [
+        '@echo off',
+        'ping -n 5 127.0.0.1 >nul',
+        `"${installer}" /S`,
+        'for /L %%i in (1,1,12) do (',
+        `  tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul && exit /b 0`,
+        `  start "" "${exe}"`,
+        '  ping -n 11 127.0.0.1 >nul',
+        ')',
+        '',
+      ].join('\r\n'));
+      spawn(process.env.ComSpec || 'cmd.exe', ['/c', `"${bat}"`],
+        { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+      launched = true;
+    } catch {}
+    if (!launched) { // temp dir unwritable — fall back to the old timed one-liner
+      const cmd = `ping -n 5 127.0.0.1 >nul & "${installer}" /S & ping -n 12 127.0.0.1 >nul & start "" "${exe}" & ping -n 6 127.0.0.1 >nul & start "" "${exe}"`;
+      spawn(process.env.ComSpec || 'cmd.exe', ['/c', cmd],
+        { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+    }
     BrowserWindow.getAllWindows().forEach((w) => { try { w.removeAllListeners('close'); w.close(); } catch {} });
     setImmediate(() => app.quit());
     return;
