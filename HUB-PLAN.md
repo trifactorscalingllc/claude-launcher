@@ -4,6 +4,23 @@ Decisions (user, 2026-06-10): everyone is remote (PC, mini, partners all differe
 places); no domain / no Cloudflare account; Phase 1 only (share hosting — the
 live cross-machine analytics "database" is Phase 2, later).
 
+## GAME-CHANGER discovered 2026-06-11: the team runs TAILSCALE
+
+The PC reaches the mini at `tfs@trifactors-mac-mini` (100.107.103.106, Tailscale
+SSH on; Gavin VNCs into the same box, so he's likely on the tailnet too). A
+tailnet address is STABLE across reboots — for tailnet members the hub needs
+**no tunnel and no rendezvous at all**: codes carry
+`http://trifactors-mac-mini:<port>/<repo>.git` + token, done. The
+cloudflared-tunnel + gist-rendezvous design below is only the fallback for
+partners OUTSIDE the tailnet (or invite them — free plan allows 3 users).
+Build the tailnet path first; it deletes the two hardest problems.
+
+Mini state (prepped 2026-06-11 over SSH): Helm v1.21.0 installed + running,
+git 2.50.1, cloudflared 2026.6.0 staged in
+`~/Library/Application Support/claude-launcher/bin/`, macOS 26.4 arm64.
+hub.js currently binds 127.0.0.1 — hub mode must bind the tailnet interface
+(or 0.0.0.0) on the mini.
+
 ## Architecture
 
 ```
