@@ -6,7 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `
 ## [Unreleased]
 
 ### Fixed
+- **Token, cost and turn counts were ~3× too high** — Claude Code logs one transcript line per assistant content block, each repeating the same message id and usage, and continuation/fork session files replay the parent session's lines verbatim. Helm counted every line every time. The indexer now processes each line and each API call exactly once across all files (verified against real history: $9,002 shown → $2,723 actual). All history recomputes on first launch after update.
+- **Active time was inflated too** — replayed history in continuation files re-counted the same working gaps (~15% high); now counted once.
 - **Clear error for Windows-unreachable project folders** — folders whose names end in a dot or space (e.g. `T.O.M.`) exist on disk but can't be entered by any Windows terminal, so launching them flashed Windows Terminal's cryptic `0x8007010B Could not access starting directory`. Helm now explains the problem and tells you to rename the folder, instead of copying a fallback `cd` command that fails the same way. Missing folders (stale rows) also get a plain "Folder not found" message.
+
+### Changed
+- **Removed the redundant Launch button on project rows** — launching lives in the per-file Launchable-files subtree (and the detail view); the row keeps Open, pin, and the menu.
+- New test suite `test-indexer.js` (24 assertions) covers usage dedup, continuation-file skipping, sidechain gauge isolation, daily buckets, and restart safety; wired into `npm test`.
 
 ## [1.18.0] - 2026-06-10
 

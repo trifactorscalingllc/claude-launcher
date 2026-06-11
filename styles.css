@@ -1297,11 +1297,6 @@ details.more-detail[open] > summary::before { transform: rotate(90deg); }
 .recap-range button { font-size: 11.5px; padding: 3px 9px; }
 .recap-panel .recap-refresh { margin-left: auto; }
 .btn-xs { padding: 3px 7px; font-size: 11px; line-height: 1; margin-left: auto; }
-/* Launch button on a project row sits right after Open — no extra auto-gap. */
-.rrow .preview-btn { margin-left: 6px; display: inline-flex; align-items: center; gap: 4px; }
-.rrow .preview-btn.hidden { display: none; }
-.rrow .preview-btn.running { border-color: #2f8f5b; color: #2f8f5b; background: rgba(47, 143, 91, .08); }
-.rrow .preview-btn.running:hover { background: rgba(47, 143, 91, .16); }
 .detail-actions .d-launch, .detail-actions .d-stop { display: inline-flex; align-items: center; gap: 6px; }
 .detail-actions .d-stop { border-color: #c0563f; color: #c0563f; }
 .recap-stat { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }

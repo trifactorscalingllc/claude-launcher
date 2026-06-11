@@ -42,7 +42,12 @@ function dayKey(ts) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-const STORE_VERSION = 4; // bump → full re-index (v4: MCP call monitoring — errors, latency, recent feed)
+const STORE_VERSION = 5; // bump → full re-index (v5: dedup usage by message id + skip continuation-file copies)
+
+// Seen-key memory for the dedup below. Continuation transcripts copy history
+// with ORIGINAL timestamps, so keys must outlive the longest conversation span.
+const SEEN_KEEP_DAYS = 45;
+const dayNum = (ts) => Math.floor(ts / 86400000);
 
 class Indexer {
   constructor(claudeProjectsDir, storePath) {
@@ -74,6 +79,11 @@ class Indexer {
     }
     // cross-project MCP monitoring: per-server/tool aggregates + a recent-calls ring
     if (!this.store.mcp) this.store.mcp = { servers: {}, recent: [] };
+    // global line/message dedup memory (see applyEvent)
+    if (!this.store.seen) this.store.seen = { line: {}, msg: {} };
+    if (!this.store.seen.line) this.store.seen.line = {};
+    if (!this.store.seen.msg) this.store.seen.msg = {};
+    this._pruneSeen();
     this._totals.clear();
     this._combinedDaily = null;
     this.loaded = true;
@@ -141,9 +151,30 @@ class Indexer {
     return p.sessions[sessionId];
   }
 
+  // Drop dedup keys older than SEEN_KEEP_DAYS so the store stays bounded.
+  _pruneSeen() {
+    const cutoff = dayNum(Date.now()) - SEEN_KEEP_DAYS;
+    for (const m of [this.store.seen.line, this.store.seen.msg]) {
+      for (const k in m) if (m[k] < cutoff) delete m[k];
+    }
+  }
+
   // Process one parsed JSONL object against a session aggregate.
   applyEvent(o, sess, daily, hourly, cwd) {
     const ts = o.timestamp ? Date.parse(o.timestamp) : 0;
+
+    // Continuation/fork transcripts replay the parent session's lines verbatim —
+    // same uuid, same message ids, original timestamps. Process every line
+    // exactly once across ALL files, or the copied history's active time,
+    // tools, tokens and cost count again (observed: 3 near-identical session
+    // files = 3x spend). Key = first 20 hex chars (dashes stripped): enough
+    // randomness for v4 uuids, and still unique for time-ordered v7 layouts.
+    if (o.uuid) {
+      const k = String(o.uuid).replace(/-/g, '').slice(0, 20);
+      if (this.store.seen.line[k]) return;
+      this.store.seen.line[k] = dayNum(ts || Date.now());
+    }
+
     if (ts) {
       if (sess.lastTs) {
         const gap = ts - sess.lastTs;
@@ -162,9 +193,16 @@ class Indexer {
     }
 
     const msg = o.message;
-    if (msg && msg.model) sess.models[msg.model] = (sess.models[msg.model] || 0) + 1;
 
-    if (o.type === 'assistant' && msg && msg.usage) {
+    // One API call is logged once per content block — every line of the batch
+    // repeats the same message id and the same full usage object. Count usage
+    // (and the model/turn) once per message, never per line, or tokens, cost
+    // and turns all inflate ~2.5-3x. Tool blocks below still process per line.
+    const mid = (o.type === 'assistant' && msg && msg.id) ? 'm' + String(msg.id).slice(-16) : '';
+    const usageCounted = mid && this.store.seen.msg[mid];
+    if (o.type === 'assistant' && msg && msg.usage && !usageCounted) {
+      if (mid) this.store.seen.msg[mid] = dayNum(ts || Date.now());
+      if (msg.model) sess.models[msg.model] = (sess.models[msg.model] || 0) + 1;
       const u = msg.usage;
       const inc = u.input_tokens || 0;
       const out = u.output_tokens || 0;
@@ -194,6 +232,9 @@ class Indexer {
         hourly[hk] = hourly[hk] || { activeMs: 0, cost: 0 };
         hourly[hk].cost += cost;
       }
+    } else if (msg && msg.model && !usageCounted) {
+      // non-usage events (rare synthetic/user lines with a model) keep counting
+      sess.models[msg.model] = (sess.models[msg.model] || 0) + 1;
     }
 
     // tool usage + files touched

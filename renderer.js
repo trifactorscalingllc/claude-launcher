@@ -280,25 +280,6 @@ async function stopPreview(p) {
   await window.launcher.previewStop(p.path);
 }
 
-// Decorate a row/card's preview button from current profile + running state. Idempotent.
-function paintPreviewBtn(btn, p) {
-  if (!btn) return;
-  const prof = previewProfiles[p.path];
-  if (!prof || !prof.launchable) { btn.classList.add('hidden'); return; }
-  btn.classList.remove('hidden');
-  const run = previewRunning[p.path];
-  if (run) {
-    const starting = run.status === 'starting';
-    btn.classList.add('running');
-    btn.innerHTML = `${svg(starting ? 'globe' : 'play', 13)} ${starting ? 'Starting…' : 'Open'}`;
-    btn.title = starting ? 'Starting…' : `Open ${run.url} · running`;
-  } else {
-    btn.classList.remove('running');
-    btn.innerHTML = `${svg('globe', 13)} Launch`;
-    btn.title = `${prof.label}${prof.command ? ' · ' + prof.command : ''}`;
-  }
-}
-
 // Paint the detail view's Launch / Stop buttons from current state.
 function paintDetailLaunch(p) {
   const lb = document.querySelector('#view-detail .d-launch');
@@ -431,13 +412,8 @@ async function openShareModal(p) {
   body.querySelector('.sh-stop').addEventListener('click', async () => { await window.launcher.previewShareStop(p.path); close(); showStatus('Share stopped.', 'ok'); });
 }
 
-// Update every visible row's preview button in place (called on preview-changed).
+// Update every visible launchables subtree in place (called on preview-changed).
 function repaintAllPreviewBtns() {
-  document.querySelectorAll('.rrow[data-path]').forEach((el) => {
-    const path = el.dataset.path;
-    const p = projects.find((x) => x.path === path) || externalProjects.find((x) => x.path === path);
-    if (p) paintPreviewBtn(el.querySelector('.preview-btn'), p);
-  });
   document.querySelectorAll('.rr-sub[data-sub-for]').forEach((sub) => {
     const path = sub.dataset.subFor;
     const p = projects.find((x) => x.path === path) || externalProjects.find((x) => x.path === path);
@@ -539,13 +515,9 @@ function makeResumeRow(p) {
     </div>
     <button class="pin-btn ${pinned ? 'pinned' : ''}" title="${pinned ? 'Unpin' : 'Pin'}">${pinned ? fillSvg('star', 15) : svg('star', 15)}</button>
     <button class="btn primary btn-xs open">${svg('terminal', 14)} Open</button>
-    <button class="btn ghost btn-xs preview-btn hidden" title="Launch app/site"></button>
     <button class="icon-btn more" title="Details &amp; actions">${svg('dots', 16)}</button>`;
   el.addEventListener('click', (e) => { if (!e.target.closest('button')) openRow(p); });
   el.querySelector('.open').addEventListener('click', (e) => { e.stopPropagation(); openRow(p); });
-  const pv = el.querySelector('.preview-btn');
-  paintPreviewBtn(pv, p);
-  pv.addEventListener('click', (e) => { e.stopPropagation(); launchPreview(p); });
   el.querySelector('.more').addEventListener('click', (e) => { e.stopPropagation(); openCardMenu(e.currentTarget, p); });
   el.querySelector('.pin-btn').addEventListener('click', async (e) => { e.stopPropagation(); cfg.pinned = await window.launcher.togglePin(p.path); render(); });
   loadMetrics(el, p);
