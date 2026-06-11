@@ -3,7 +3,7 @@
 All notable changes to Claude Helm are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `package.json` semver.
 
-## [Unreleased]
+## [1.19.0] - 2026-06-10
 
 ### Added
 - **Copy session as Markdown** — export any conversation as clean Markdown: "Copy Markdown" and "Save .md…" in the transcript viewer (with an optional include-thinking toggle), plus a Copy button on every session row in project detail. Exports the full transcript with no display caps; tool calls and results render as code blocks.
