@@ -3,6 +3,11 @@
 All notable changes to Claude Helm are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `package.json` semver.
 
+## [1.20.0] - 2026-06-10
+
+### Added
+- **Partners need no GitHub account anymore.** The partner code now carries its own repo-scoped access key (a deploy key minted per share): your partner pastes the code and Helm clones + syncs with zero sign-in, zero setup. Treat the code like a password — and "Stop" on a share now revokes that key. If key creation ever fails, Helm falls back to the old collaborator-invite flow and tells you exactly what to do. Old (v1) codes keep working.
+
 ## [1.19.2] - 2026-06-10
 
 ### Fixed

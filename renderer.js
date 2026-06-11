@@ -735,9 +735,8 @@ function openPartnerShareModal() {
   const all = [...projects, ...externalProjects];
   const { el, close } = popModal(`
     <h3>Share a project with a partner</h3>
-    <p class="modal-sub">Creates a private GitHub repo, pushes the project + your Claude context, and gives you a partner code. Needs the GitHub CLI (<code>gh</code>) signed in.</p>
+    <p class="modal-sub">Creates a private repo, pushes the project + your Claude context, and gives you a partner code. <strong>Your partner needs nothing</strong> — no GitHub account, no sign-in: the code carries its own access key, so treat it like a password.</p>
     <select id="ptProject" class="filter-sel" style="width:100%">${all.map((p) => `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name)}</option>`).join('')}</select>
-    <input id="ptGithub" type="text" placeholder="Partner's GitHub username — needed so they can open the private repo" autocomplete="off" spellcheck="false" style="margin-top:10px" />
     <div class="modal-actions">
       <button class="btn ghost pt-cancel">Cancel</button>
       <button class="btn primary pt-go">Share</button>
@@ -745,20 +744,13 @@ function openPartnerShareModal() {
   el.querySelector('.pt-cancel').addEventListener('click', close);
   el.querySelector('.pt-go').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
-    const ghUser = el.querySelector('#ptGithub').value.trim();
     const showErr = (text) => {
       let err = el.querySelector('.pt-err');
       if (!err) { err = document.createElement('p'); err.className = 'pt-err'; el.querySelector('.modal-actions').before(err); }
       err.textContent = text;
     };
-    // the repo is private — without their username the partner's clone is dead on arrival
-    if (!ghUser && !btn.dataset.confirmedBlank) {
-      btn.dataset.confirmedBlank = '1';
-      showErr('No GitHub username: your partner won’t be able to clone until you add them as a collaborator yourself. Click Share again to continue anyway.');
-      return;
-    }
     btn.disabled = true; btn.textContent = 'Sharing… (can take a minute)';
-    const r = await window.launcher.partnerShare(el.querySelector('#ptProject').value, ghUser);
+    const r = await window.launcher.partnerShare(el.querySelector('#ptProject').value, '');
     if (!r || !r.ok) {
       // failure stays on screen — a toast behind a closing modal reads as "nothing happened"
       btn.disabled = false; btn.textContent = 'Share';
@@ -766,11 +758,9 @@ function openPartnerShareModal() {
       return;
     }
     close();
-    const accessLine = r.invited
-      ? ` GitHub access granted to <strong>${escapeHtml(r.invited)}</strong>.`
-      : r.inviteError
-        ? ` <strong style="color:#b3402a">Couldn’t grant access to ${escapeHtml(ghUser)}</strong> (${escapeHtml(r.inviteError)}) — fix the username and Share again, or add them as a collaborator on GitHub. Until then their clone will fail.`
-        : ' You left the GitHub username blank — add your partner as a collaborator on the repo or their clone will fail.';
+    const accessLine = r.keyless
+      ? ' The code includes its own access key — your partner needs no GitHub account. Treat the code like a password; Stop revokes it.'
+      : ` <strong style="color:#b3402a">Couldn’t attach an access key${r.keyWarning ? ` (${escapeHtml(r.keyWarning)})` : ''}</strong> — your partner will need a GitHub account with access: add them as a collaborator on the repo, then they can join with this code.`;
     const sideLine = r.sideRemote ? '<br><br>This project has its own git remote, so the share lives on a separate private repo (remote <code>helm-share</code>) — your original remote is untouched.' : '';
     const m = popModal(`
       <h3>Partner code ready</h3>

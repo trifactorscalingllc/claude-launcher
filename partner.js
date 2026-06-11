@@ -14,6 +14,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const SYNC_INTERVAL_MS = 45000;
@@ -31,13 +33,58 @@ function init(e) {
 }
 function stopAll() { if (timer) clearInterval(timer); }
 
-function git(cwd, args, timeoutMs = 60000) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true });
+function git(cwd, args, timeoutMs = 60000, extraEnv) {
+  const r = spawnSync('git', args, {
+    cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true,
+    env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
+  });
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim(), code: r.status };
 }
-function gh(args, timeoutMs = 60000) {
-  const r = spawnSync('gh', args, { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, shell: process.platform === 'win32' });
+function gh(args, timeoutMs = 60000, input) {
+  const r = spawnSync('gh', args, { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, shell: process.platform === 'win32', input });
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
+}
+
+// ---- repo-scoped access keys (the partner code carries its own credential) ----
+function keysDir() {
+  const d = path.join(env.home, '.claude', 'helm-keys');
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
+// OpenSSH refuses private keys other users could read; lock to the current user.
+function lockDownKey(file) {
+  try {
+    if (process.platform === 'win32') {
+      const user = process.env.USERNAME || process.env.USER || '';
+      if (user) spawnSync('icacls', [file, '/inheritance:r', '/grant:r', `${user}:F`], { windowsHide: true, stdio: 'ignore' });
+    } else {
+      fs.chmodSync(file, 0o600);
+    }
+  } catch {}
+}
+
+// Generate a throwaway ed25519 keypair via ssh-keygen (ships with git on every platform).
+function makeKeypair() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'helm-key-'));
+  const kf = path.join(tmp, 'id');
+  try {
+    const r = spawnSync('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'claude-helm-partner', '-f', kf], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    if (r.status !== 0) return { ok: false, error: (r.stderr || 'ssh-keygen failed').trim().slice(0, 200) };
+    return { ok: true, priv: fs.readFileSync(kf, 'utf8'), pub: fs.readFileSync(kf + '.pub', 'utf8').trim() };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// Install a share key on the partner machine; returns the ssh command git should use.
+function installShareKey(sshUrl, keyB64) {
+  const file = path.join(keysDir(), crypto.createHash('sha1').update(String(sshUrl)).digest('hex').slice(0, 12) + '.key');
+  fs.writeFileSync(file, Buffer.from(keyB64, 'base64url').toString('utf8'));
+  lockDownKey(file);
+  return `ssh -i "${file.replace(/\\/g, '/')}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`;
 }
 
 function setStatus(projectPath, state, detail) {
@@ -230,28 +277,44 @@ function shareProject(projectPath, partnerGithub) {
   const p = git(projectPath, ['push', '-u', remoteName, branch], 180000);
   if (!p.ok && !/up to date/i.test(p.err)) return { ok: false, error: 'Push failed: ' + p.err };
 
-  // 3. invite the partner's GitHub account as collaborator. The repo is private,
-  // so without access the partner's clone is guaranteed to fail — a failed
-  // invite must be loud, not silent.
+  // 3. mint a repo-scoped deploy key and put it IN the code — the partner then
+  // needs no GitHub account at all. Falls back to the collaborator-invite flow
+  // when key creation fails (and says so loudly: private repo + no access =
+  // the partner's clone is guaranteed to fail).
+  let code = '';
+  let deployKeyId = 0;
+  let keyless = false;
+  let keyWarning = '';
   let invited = '';
   let inviteError = '';
-  if (partnerGithub) {
-    const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
-    if (m) {
-      const inv = gh(['api', `repos/${m[1]}/${m[2]}/collaborators/${partnerGithub.trim()}`, '-X', 'PUT', '-f', 'permission=push']);
-      if (inv.ok) invited = partnerGithub.trim();
-      else inviteError = (inv.err || inv.out || 'invite failed').slice(0, 200);
-    }
+  const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+  if (m) {
+    const kp = makeKeypair();
+    if (kp.ok) {
+      const add = gh(['api', `repos/${m[1]}/${m[2]}/keys`, '-X', 'POST', '--input', '-'], 60000,
+        JSON.stringify({ title: 'Claude Helm partner key', key: kp.pub, read_only: false }));
+      if (add.ok) {
+        try { deployKeyId = JSON.parse(add.out).id || 0; } catch {}
+        const ssh = `git@github.com:${m[1]}/${m[2]}.git`;
+        code = encodeCode({ v: 2, url, ssh, key: Buffer.from(kp.priv, 'utf8').toString('base64url'), name });
+        keyless = true;
+      } else keyWarning = (add.err || add.out || 'could not attach the access key').slice(0, 200);
+    } else keyWarning = kp.error;
   }
+  if (!keyless && partnerGithub && m) {
+    const inv = gh(['api', `repos/${m[1]}/${m[2]}/collaborators/${partnerGithub.trim()}`, '-X', 'PUT', '-f', 'permission=push']);
+    if (inv.ok) invited = partnerGithub.trim();
+    else inviteError = (inv.err || inv.out || 'invite failed').slice(0, 200);
+  }
+  if (!code) code = encodeCode({ v: 1, url, name });
 
-  // 4. record + mint the code
+  // 4. record the share
   const cfg = env.loadConfig();
   cfg.partners = (cfg.partners || []).filter((x) => x.projectPath !== projectPath);
-  const code = encodeCode({ v: 1, url, name });
-  cfg.partners.push({ projectPath, name, url, role: 'owner', code, remote: remoteName, autoSync: true, added: Date.now() });
+  cfg.partners.push({ projectPath, name, url, role: 'owner', code, remote: remoteName, deployKeyId, autoSync: true, added: Date.now() });
   env.saveConfig(cfg);
   setStatus(projectPath, 'synced');
-  return { ok: true, code, url, invited, inviteError, sideRemote: remoteName === 'helm-share' };
+  return { ok: true, code, url, keyless, keyWarning, invited, inviteError, sideRemote: remoteName === 'helm-share' };
 }
 
 // ---- partner: join with a code ----
@@ -280,15 +343,26 @@ function joinWithCode(code, projectsRoot) {
   const name = (payload.name || 'partner-project').replace(/[<>:"/\\|?*]/g, '-');
   let dest = path.join(projectsRoot, name);
 
+  // v2 codes carry their own repo-scoped access key — no GitHub account needed.
+  const hasKey = !!(payload.v >= 2 && payload.key && payload.ssh);
+  const cloneUrl = hasKey ? payload.ssh : payload.url;
+  let sshCmd = '';
+  if (hasKey) {
+    try { sshCmd = installShareKey(payload.ssh, payload.key); }
+    catch (e) { return { ok: false, error: 'Could not install the access key from the code: ' + e.message }; }
+  }
+  const useKey = (repoDir) => { if (sshCmd) git(repoDir, ['config', 'core.sshCommand', sshCmd]); };
+
   // A folder with this name already exists. Joining must never be a dead end:
   // stopping a share leaves files on disk (by design), so rejoining the same
   // repo has to reconnect that folder instead of refusing forever.
   if (fs.existsSync(dest)) {
     const origin = fs.existsSync(path.join(dest, '.git')) ? git(dest, ['remote', 'get-url', 'origin']).out : '';
-    if (origin && repoKey(origin) === repoKey(payload.url)) {
+    if (origin && (repoKey(origin) === repoKey(payload.url) || repoKey(origin) === repoKey(cloneUrl))) {
       ensureGitIdentity(dest);
+      useKey(dest); // a re-shared code may carry a fresh key — always refresh
       importContext(dest);
-      const entry = registerPartner(dest, name, payload.url);
+      const entry = registerPartner(dest, name, origin);
       try { syncOne(entry); } catch {}
       return { ok: true, path: dest, name, adopted: true };
     }
@@ -306,15 +380,19 @@ function joinWithCode(code, projectsRoot) {
     }
   }
 
-  const c = git(projectsRoot, ['clone', payload.url, dest], 300000);
+  const c = git(projectsRoot, ['clone', cloneUrl, dest], 300000, sshCmd ? { GIT_SSH_COMMAND: sshCmd } : undefined);
   if (!c.ok) {
-    return { ok: false, error: 'Clone failed — make sure the owner gave your GitHub account access, and that git can sign in (it may pop up a browser). Details: ' + c.err.slice(0, 300) };
+    const hint = hasKey
+      ? 'The code carries its own access key, so this is usually a network problem — or the owner stopped the share (which removes the key).'
+      : 'Make sure the owner gave your GitHub account access, and that git can sign in (it may pop up a browser).';
+    return { ok: false, error: `Clone failed — ${hint} Details: ` + c.err.slice(0, 300) };
   }
   ensureGitIdentity(dest);
+  useKey(dest); // persist for the sync loop — no env needed after this
   importContext(dest);
   const finalName = path.basename(dest);
-  registerPartner(dest, finalName, payload.url);
-  return { ok: true, path: dest, name: finalName, renamed: finalName !== name };
+  registerPartner(dest, finalName, cloneUrl);
+  return { ok: true, path: dest, name: finalName, renamed: finalName !== name, keyless: hasKey };
 }
 
 // ---- the live sync loop ----
@@ -372,6 +450,12 @@ function list() {
 
 function remove(projectPath) {
   const cfg = env.loadConfig();
+  const entry = (cfg.partners || []).find((x) => x.projectPath === projectPath);
+  // an owner stopping a keyed share revokes the partner's access key (best effort)
+  if (entry && entry.role === 'owner' && entry.deployKeyId) {
+    const m = String(entry.url || '').match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+    if (m) gh(['api', `repos/${m[1]}/${m[2]}/keys/${entry.deployKeyId}`, '-X', 'DELETE']);
+  }
   cfg.partners = (cfg.partners || []).filter((x) => x.projectPath !== projectPath);
   env.saveConfig(cfg);
   liveStatus.delete(projectPath);
@@ -392,7 +476,6 @@ function setAutoSync(projectPath, on) {
 // sync round trip) with throwaway content, logging PASS/FAIL per step. Leaves the
 // dummy repo + partner code behind so a second machine (e.g. the Mac) can join it
 // and verify the cross-machine leg before any real project is shared.
-const os = require('os');
 
 async function selfTest(progress) {
   const steps = [];

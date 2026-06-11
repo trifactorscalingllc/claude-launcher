@@ -166,6 +166,27 @@ const memDirFor = (home, proj) => path.join(home, '.claude', 'projects', proj.re
   check('share remote carries the env file', shareTree.includes('.env'));
   check('the project\'s own remote did NOT receive sync commits', !ownTree.includes('feature.js') && !ownTree.includes('.helm-context'), ownTree);
 
+  console.log('\n[7] v2 codes: the access key travels in the code (no GitHub account)');
+  partner.init(B.env);
+  const fakeKey = Buffer.from('-----BEGIN OPENSSH PRIVATE KEY-----\nfake-for-test\n-----END OPENSSH PRIVATE KEY-----\n', 'utf8').toString('base64url');
+  const codeV2 = 'HELM-' + Buffer.from(JSON.stringify({ v: 2, url: bare, ssh: bare, key: fakeKey, name: 'keyed-site' })).toString('base64url');
+  const p2 = partner.decodeCode(codeV2);
+  check('v2 payload round-trips', p2 && p2.v === 2 && p2.key === fakeKey && p2.ssh === bare);
+  const projectsF = path.join(tmp, 'projects-F');
+  fs.mkdirSync(projectsF, { recursive: true });
+  const jk = partner.joinWithCode(codeV2, projectsF);
+  check('v2 join ok', jk.ok && jk.keyless === true, jk.error || JSON.stringify(jk));
+  const keyFiles = fs.readdirSync(path.join(B.home, '.claude', 'helm-keys')).filter((f) => f.endsWith('.key'));
+  check('key file installed under ~/.claude/helm-keys', keyFiles.length >= 1, keyFiles);
+  const sshCmd = sh(jk.path, 'git', ['config', 'core.sshCommand']).stdout.trim();
+  check('core.sshCommand persisted for the sync loop', /ssh -i ".*\.key" -o IdentitiesOnly=yes/.test(sshCmd), sshCmd);
+  check('key file contents restored from the code', fs.readFileSync(path.join(B.home, '.claude', 'helm-keys', keyFiles[0]), 'utf8').includes('fake-for-test'));
+  check('v2 entry registered', B.cfg().partners.some((x) => x.projectPath === jk.path));
+  // rejoin with a v2 code adopts AND refreshes the key config
+  const cfgB2 = B.cfg(); cfgB2.partners = cfgB2.partners.filter((x) => x.projectPath !== jk.path); B.env.saveConfig(cfgB2);
+  const jk2 = partner.joinWithCode(codeV2, projectsF);
+  check('v2 rejoin adopts in place', jk2.ok && jk2.adopted === true, jk2.error || JSON.stringify(jk2));
+
   partner.stopAll();
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL TESTS PASSED');
