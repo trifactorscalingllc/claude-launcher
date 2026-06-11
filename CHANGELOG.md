@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `
 
 ### Added
 - **Copy session as Markdown** — export any conversation as clean Markdown: "Copy Markdown" and "Save .md…" in the transcript viewer (with an optional include-thinking toggle), plus a Copy button on every session row in project detail. Exports the full transcript with no display caps; tool calls and results render as code blocks.
+- **Saved & recent searches** — the search tab remembers your last 20 successful searches (with their filters) as chips on the empty-search screen, and a ★ "Save this search" pin above results keeps favorites permanently. Clicking a chip restores the query *and* its project/role/date filters. Saved chips get a hover × to remove.
 
 ### Fixed
 - **Token, cost and turn counts were ~3× too high** — Claude Code logs one transcript line per assistant content block, each repeating the same message id and usage, and continuation/fork session files replay the parent session's lines verbatim. Helm counted every line every time. The indexer now processes each line and each API call exactly once across all files (verified against real history: $9,002 shown → $2,723 actual). All history recomputes on first launch after update.

@@ -318,6 +318,20 @@ body.redact .acct-v { filter: blur(5px); }
 .sugg-theme span { position: relative; }
 .sugg-theme:hover { color: #fff; transform: translateY(-1px); border-color: transparent; box-shadow: 0 8px 22px rgba(var(--clay-rgb), 0.3); }
 .sugg-theme:hover::before { opacity: 1; }
+/* saved/recent search chips — same look as themes, smaller, with a delete × on saved */
+.sschip { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; padding: 8px 14px; }
+.sschip .sschip-x { display: none; font-size: 14px; line-height: 1; color: inherit; opacity: 0.65; padding: 0 2px; }
+.sschip:hover .sschip-x { display: inline; }
+.sschip .sschip-x:hover { opacity: 1; }
+
+/* pin-this-search bar above results */
+.search-pinbar { display: flex; justify-content: flex-end; margin-bottom: 2px; }
+.sr-pin { display: inline-flex; align-items: center; gap: 5px; font-family: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--muted); background: transparent; border: 1px solid var(--line-2); border-radius: 7px;
+  padding: 4px 9px; cursor: pointer; transition: color 0.12s, border-color 0.12s; }
+.sr-pin:hover { color: var(--clay-deep); border-color: var(--clay-soft); }
+.sr-pin.on { color: var(--clay-deep); border-color: var(--clay-soft); background: rgba(var(--clay-rgb), 0.07); }
+
 .sugg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
 .sugg-card { padding: 16px 12px 10px 16px; }
 .sugg-card .sugg-card-head { margin-bottom: 8px; }

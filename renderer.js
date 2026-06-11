@@ -1397,25 +1397,51 @@ function loadSearch() {
   setTimeout(() => input.focus(), 50);
   if (input.value.trim().length < 2) renderSearchSuggestions();
 }
-// Empty search box → recommend searches mined from the user's own usage.
+// Restore a chip's saved filters into the search controls (select, date, role).
+function applySearchFilters(f) {
+  searchFilters = { project: (f && f.project) || '', role: (f && f.role) || 'all', sinceDays: Number(f && f.sinceDays) || 0 };
+  const sel = $('filterProject'); if (sel) sel.value = searchFilters.project;
+  const fd = $('filterDate'); if (fd) fd.value = String(searchFilters.sinceDays);
+  document.querySelectorAll('#filterRole button').forEach((x) => x.classList.toggle('active', x.dataset.role === searchFilters.role));
+}
+// Human hint for a chip's stored filters ("in claude-helm · assistant · last 7 days").
+function searchFilterHint(f) {
+  if (!f) return '';
+  const bits = [];
+  if (f.project) bits.push('in ' + (f.project.split(/[\\/]/).pop() || f.project));
+  if (f.role && f.role !== 'all') bits.push(f.role);
+  if (Number(f.sinceDays) > 0) bits.push(`last ${f.sinceDays} days`);
+  return bits.join(' · ');
+}
+
+// Empty search box → saved + recent searches, then suggestions mined from usage.
 async function renderSearchSuggestions() {
   const body = $('search-body');
   body.innerHTML = '<p class="empty">Search across every project, conversation, and memory…</p>';
-  let s;
-  try { s = await window.launcher.searchSuggestions(); } catch { return; }
-  if (!s || (!s.topics.length && !s.recent.length && !s.files.length)) return;
+  let s, c;
+  try { [s, c] = await Promise.all([window.launcher.searchSuggestions(), window.launcher.getConfig()]); } catch { return; }
   if ($('searchInput').value.trim().length >= 2) return; // user typed while we mined
+  const recentSearches = (c && c.searchHistory) || [];
+  const savedSearches = (c && c.savedSearches) || [];
+  const mined = s && (s.topics.length || s.recent.length || s.files.length);
+  if (!mined && !recentSearches.length && !savedSearches.length) return;
+  if (!s) s = { topics: [], recent: [], files: [], tools: [] };
   const card = (title, icon, items) => items.length
     ? `<div class="panel sugg-card">
         <div class="sugg-card-head">${svg(icon, 14)}<span>${title}</span></div>
         ${items.map((t) => `<button class="sugg-row" data-q="${escapeHtml(t)}"><span class="sugg-row-label">${escapeHtml(t)}</span>${svg('chev', 14)}</button>`).join('')}
       </div>` : '';
+  const chips = (kind, items) => items.length ? `
+      <div class="sugg-card-head">${svg(kind === 'saved' ? 'star' : 'clock', 14)}<span>${kind === 'saved' ? 'Saved searches' : 'Recent searches'}</span></div>
+      <div class="sugg-themes">${items.map((h, i) => `<button class="sugg-theme sschip" data-kind="${kind}" data-i="${i}" title="${escapeHtml(searchFilterHint(h.filters))}"><span>${escapeHtml(kind === 'saved' ? (h.label || h.query) : h.query)}</span>${kind === 'saved' ? '<span class="sschip-x" title="Remove this saved search">×</span>' : ''}</button>`).join('')}</div>` : '';
   body.innerHTML = `<div class="sugg">
       <div class="sugg-hero">
         <span class="sugg-eyebrow">Suggested searches</span>
         <div class="sugg-title">Pick up where you left off</div>
         <p class="sugg-sub">Mined from your own work — the themes recurring across your sessions, the projects and files you touch most.</p>
       </div>
+      ${chips('saved', savedSearches)}
+      ${chips('recent', recentSearches)}
       ${s.topics.length ? `
       <div class="sugg-card-head">${svg('bulb', 14)}<span>Themes in your sessions</span></div>
       <div class="sugg-themes">${s.topics.map((t) => `<button class="sugg-theme" data-q="${escapeHtml(t)}"><span>${escapeHtml(t)}</span></button>`).join('')}</div>` : ''}
@@ -1429,6 +1455,23 @@ async function renderSearchSuggestions() {
     $('searchInput').value = b.dataset.q;
     runSearch(b.dataset.q);
   }));
+  // saved/recent chips restore filters too, not just the text
+  body.querySelectorAll('.sschip').forEach((b) => {
+    const h = (b.dataset.kind === 'saved' ? savedSearches : recentSearches)[Number(b.dataset.i)];
+    if (!h) return;
+    b.addEventListener('click', (e) => {
+      if (e.target.closest('.sschip-x')) return;
+      $('searchInput').value = h.query;
+      applySearchFilters(h.filters);
+      runSearch(h.query);
+    });
+    const x = b.querySelector('.sschip-x');
+    if (x) x.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await window.launcher.deleteSearch(h.id);
+      renderSearchSuggestions();
+    });
+  });
 }
 
 async function runSearch(q) {
@@ -1439,19 +1482,27 @@ async function runSearch(q) {
   }
   body.innerHTML = '<p class="empty">Searching…</p>';
   const projList = [...projects, ...externalProjects].map((p) => ({ path: p.path, name: p.name }));
-  const [{ results, contexts = [], scanned, truncated }, projHits] = await Promise.all([
+  const [{ results, contexts = [], scanned, truncated }, projHits, freshCfg] = await Promise.all([
     window.launcher.searchTranscripts(q, searchFilters),
     searchFilters.project ? Promise.resolve([]) : window.launcher.searchProjects(q, projList),
+    window.launcher.getConfig().catch(() => null),
   ]);
   if (!results.length && !contexts.length && !projHits.length) {
     body.innerHTML = `<p class="empty">No matches for "${escapeHtml(q)}" in your projects, conversations, or context.</p>`;
     return;
   }
+  // a search that found something is worth remembering (MRU, deduped in main)
+  window.launcher.pushSearch({ query: q, filters: searchFilters }).catch(() => {});
+  const pinKey = JSON.stringify([q.toLowerCase(), searchFilters]);
+  const isPinned = ((freshCfg && freshCfg.savedSearches) || [])
+    .some((s) => JSON.stringify([(s.query || '').toLowerCase(), s.filters || {}]) === pinKey);
   // highlight every query word, not just the exact phrase
   const words = q.split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const rx = new RegExp('(' + words.join('|') + ')', 'ig');
   const hl = (s) => escapeHtml(s).replace(rx, '<mark>$1</mark>');
-  let html = '';
+  let html = `<div class="search-pinbar">
+    <button class="sr-pin ${isPinned ? 'on' : ''}" title="${isPinned ? 'Unpin this search' : 'Pin this search (with its filters) to the empty-search screen'}">${isPinned ? fillSvg('star', 13) : svg('star', 13)} ${isPinned ? 'Saved' : 'Save this search'}</button>
+  </div>`;
 
   if (projHits.length) {
     html += `<div class="section-head">${svg('grid', 15)} Projects <span class="count">${projHits.length}</span></div>`;
@@ -1492,6 +1543,15 @@ async function runSearch(q) {
   }
 
   body.innerHTML = html;
+  const pinBtn = body.querySelector('.sr-pin');
+  if (pinBtn) pinBtn.addEventListener('click', async () => {
+    const r = await window.launcher.saveSearch({ query: q, filters: searchFilters });
+    if (!r || !r.ok) { showStatus((r && r.error) || 'Could not save the search.', 'warn'); return; }
+    pinBtn.classList.toggle('on', r.saved);
+    pinBtn.innerHTML = `${r.saved ? fillSvg('star', 13) : svg('star', 13)} ${r.saved ? 'Saved' : 'Save this search'}`;
+    pinBtn.title = r.saved ? 'Unpin this search' : 'Pin this search (with its filters) to the empty-search screen';
+    showStatus(r.saved ? 'Search pinned — it now lives on the empty-search screen.' : 'Search unpinned.', 'ok');
+  });
   // a project hit pulls the project right up: row → details, Open → launch in Claude
   body.querySelectorAll('.proj-hit[data-i]').forEach((el) => {
     const p = projHits[Number(el.dataset.i)];

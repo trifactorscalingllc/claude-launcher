@@ -63,6 +63,7 @@ Update behavior while unsigned: **Windows auto-updates silently in place.** macO
 - **One search across projects, conversations, and Claude's memory** — word-AND matching, so any description finds the thing ("roofing client site" matches even when those words never sit together).
 - **Project results pull the project right up** — open it in Claude or jump to its details from the result row.
 - **Suggested searches mined from your usage** — recurring session themes, recent projects, most-edited files, top tools. The empty search tab recommends what you were probably about to type.
+- **Saved & recent searches** — your last 20 searches live as chips on the empty search tab, filters included; pin favorites with the ★ on any results page.
 - **In-app transcript viewer** — read any conversation as a clean chat, then Resume or Branch it (`--resume … --fork-session`, original untouched).
 - **Copy any session as Markdown** — one click in the viewer (or on a session row) copies the whole conversation as clean Markdown, or save it as a `.md` file; thinking blocks optional.
 

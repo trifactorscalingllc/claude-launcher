@@ -49,6 +49,8 @@ const DEFAULTS = {
   compactDash: false,  // compact projects dashboard (dense rows, no descriptions)
   notes: {},           // { projectPath: "freeform note" }
   previewTarget: 'window', // where Launch opens a running app/site: 'window' (in-app) | 'browser'
+  searchHistory: [],   // recent searches: { query, filters, ts } — MRU, capped 20
+  savedSearches: [],   // pinned searches: { id, label, query, filters }
 };
 
 const AI_CACHE_PATH = path.join(app.getPath('userData'), 'ai-summaries.json');
@@ -1211,6 +1213,47 @@ ipcMain.handle('get-config', () => {
   delete safe.apiKey; delete safe.apiKeyEnc;
   delete safe.adminKey; delete safe.adminKeyEnc;
   return safe;
+});
+
+// ---- saved & recent searches ----
+// Called by the renderer when a search actually returns results. MRU, capped,
+// case-insensitive dedup; filters travel with the query so a chip restores both.
+ipcMain.handle('push-search', (_e, { query, filters }) => {
+  const q = String(query || '').trim();
+  if (!q) return { ok: false };
+  const cfg = loadConfig();
+  const norm = q.toLowerCase();
+  cfg.searchHistory = (cfg.searchHistory || []).filter((h) => (h.query || '').toLowerCase() !== norm);
+  cfg.searchHistory.unshift({ query: q, filters: filters || {}, ts: Date.now() });
+  cfg.searchHistory = cfg.searchHistory.slice(0, 20);
+  saveConfig(cfg);
+  return { ok: true };
+});
+
+// Toggle-pin the current query+filters. Returns { ok, saved } — saved=false means unpinned.
+ipcMain.handle('save-search', (_e, { label, query, filters }) => {
+  const q = String(query || '').trim();
+  if (!q) return { ok: false, error: 'Nothing to pin' };
+  const cfg = loadConfig();
+  cfg.savedSearches = cfg.savedSearches || [];
+  const key = JSON.stringify([q.toLowerCase(), filters || {}]);
+  const at = cfg.savedSearches.findIndex((s) => JSON.stringify([(s.query || '').toLowerCase(), s.filters || {}]) === key);
+  if (at >= 0) {
+    cfg.savedSearches.splice(at, 1);
+    saveConfig(cfg);
+    return { ok: true, saved: false };
+  }
+  cfg.savedSearches.unshift({ id: 'ss-' + Date.now().toString(36), label: label || q, query: q, filters: filters || {} });
+  cfg.savedSearches = cfg.savedSearches.slice(0, 30);
+  saveConfig(cfg);
+  return { ok: true, saved: true };
+});
+
+ipcMain.handle('delete-search', (_e, id) => {
+  const cfg = loadConfig();
+  cfg.savedSearches = (cfg.savedSearches || []).filter((s) => s.id !== id);
+  saveConfig(cfg);
+  return { ok: true };
 });
 
 ipcMain.handle('set-root', (_e, root) => {
