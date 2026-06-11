@@ -174,6 +174,11 @@ function decodeCode(code) {
 }
 
 // ---- owner: share a project ----
+// A repo Helm minted for sharing (never the project's own remote).
+function isHelmShareUrl(u) {
+  return /[:/]helm-[a-z0-9-]+(\.git)?$/.test(String(u || '').trim());
+}
+
 function shareProject(projectPath, partnerGithub) {
   if (!gh(['--version']).ok) return { ok: false, error: 'GitHub CLI (gh) is required to create the share. Install from cli.github.com and run `gh auth login`.' };
   const auth = gh(['auth', 'status']);
@@ -192,30 +197,50 @@ function shareProject(projectPath, partnerGithub) {
   forceAddEnvFiles(projectPath); // everything syncs — env files included, past .gitignore
   git(projectPath, ['commit', '-m', 'helm-partner: initial share']); // no-op if clean
 
-  // 2. remote: reuse origin if present, else create a private repo
+  // 2. remote. NEVER reuse the project's own remote: it may be public or a
+  // client's repo, and the share force-pushes .env secrets. Only a repo Helm
+  // itself minted (helm-*) is reused; anything else gets a fresh private repo
+  // on a dedicated 'helm-share' remote, leaving origin untouched.
   let url = '';
-  const remote = git(projectPath, ['remote', 'get-url', 'origin']);
-  if (remote.ok && remote.out) {
-    url = remote.out;
-  } else {
-    const repoName = ('helm-' + name).toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 80) + '-' + Math.random().toString(36).slice(2, 7);
-    const c = gh(['repo', 'create', repoName, '--private', '--source', projectPath, '--remote', 'origin', '--push'], 180000);
+  let remoteName = 'origin';
+  const newRepoName = () => ('helm-' + name).toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 80) + '-' + Math.random().toString(36).slice(2, 7);
+  const origin = git(projectPath, ['remote', 'get-url', 'origin']);
+  const side = git(projectPath, ['remote', 'get-url', 'helm-share']);
+  if (origin.ok && origin.out && isHelmShareUrl(origin.out)) {
+    url = origin.out; // a repo we minted earlier — keep using it
+  } else if (side.ok && side.out) {
+    url = side.out;   // shared before through the side remote
+    remoteName = 'helm-share';
+  } else if (origin.ok && origin.out) {
+    // the project has its own remote — create the share beside it
+    remoteName = 'helm-share';
+    const c = gh(['repo', 'create', newRepoName(), '--private'], 180000);
     if (!c.ok) return { ok: false, error: 'Could not create the private repo: ' + (c.err || c.out) };
-    const u = git(projectPath, ['remote', 'get-url', 'origin']);
-    url = u.out;
+    url = (c.out || '').trim().split('\n').pop();
+    if (!url) return { ok: false, error: 'GitHub did not return the new repo URL.' };
+    const ra = git(projectPath, ['remote', 'add', 'helm-share', url]);
+    if (!ra.ok) return { ok: false, error: 'Could not add the share remote: ' + ra.err };
+  } else {
+    const c = gh(['repo', 'create', newRepoName(), '--private', '--source', projectPath, '--remote', 'origin', '--push'], 180000);
+    if (!c.ok) return { ok: false, error: 'Could not create the private repo: ' + (c.err || c.out) };
+    url = git(projectPath, ['remote', 'get-url', 'origin']).out;
   }
   // make sure everything is pushed
   const branch = git(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']).out || 'main';
-  const p = git(projectPath, ['push', '-u', 'origin', branch], 180000);
+  const p = git(projectPath, ['push', '-u', remoteName, branch], 180000);
   if (!p.ok && !/up to date/i.test(p.err)) return { ok: false, error: 'Push failed: ' + p.err };
 
-  // 3. optional: invite the partner's GitHub account as collaborator
+  // 3. invite the partner's GitHub account as collaborator. The repo is private,
+  // so without access the partner's clone is guaranteed to fail — a failed
+  // invite must be loud, not silent.
   let invited = '';
+  let inviteError = '';
   if (partnerGithub) {
     const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
     if (m) {
       const inv = gh(['api', `repos/${m[1]}/${m[2]}/collaborators/${partnerGithub.trim()}`, '-X', 'PUT', '-f', 'permission=push']);
-      invited = inv.ok ? partnerGithub.trim() : '';
+      if (inv.ok) invited = partnerGithub.trim();
+      else inviteError = (inv.err || inv.out || 'invite failed').slice(0, 200);
     }
   }
 
@@ -223,10 +248,10 @@ function shareProject(projectPath, partnerGithub) {
   const cfg = env.loadConfig();
   cfg.partners = (cfg.partners || []).filter((x) => x.projectPath !== projectPath);
   const code = encodeCode({ v: 1, url, name });
-  cfg.partners.push({ projectPath, name, url, role: 'owner', code, autoSync: true, added: Date.now() });
+  cfg.partners.push({ projectPath, name, url, role: 'owner', code, remote: remoteName, autoSync: true, added: Date.now() });
   env.saveConfig(cfg);
   setStatus(projectPath, 'synced');
-  return { ok: true, code, url, invited };
+  return { ok: true, code, url, invited, inviteError, sideRemote: remoteName === 'helm-share' };
 }
 
 // ---- partner: join with a code ----
@@ -308,7 +333,8 @@ function syncOne(entry) {
       git(p, ['add', '-A']);
       git(p, ['commit', '-m', 'helm-sync: auto']);
     }
-    const pull = git(p, ['pull', '--rebase', '--autostash', 'origin'], 120000);
+    const remote = entry.remote || 'origin'; // owners of projects with their own repo sync via 'helm-share'
+    const pull = git(p, ['pull', '--rebase', '--autostash', remote], 120000);
     if (!pull.ok) {
       if (/CONFLICT|could not apply/i.test(pull.err + pull.out)) {
         git(p, ['rebase', '--abort']);
@@ -321,7 +347,7 @@ function syncOne(entry) {
       setStatus(p, 'error', pull.err.slice(0, 200) || 'pull failed');
       return;
     }
-    const push = git(p, ['push'], 120000);
+    const push = git(p, ['push', remote, 'HEAD'], 120000);
     if (!push.ok && !/up.to.date/i.test(push.err)) { setStatus(p, 'error', push.err.slice(0, 200)); return; }
     importContext(p); // pick up context the other side exported
     setStatus(p, 'synced');
@@ -489,4 +515,4 @@ async function selfTest(progress) {
   return { ok: okAll, steps, code, url, repoFull };
 }
 
-module.exports = { init, stopAll, shareProject, joinWithCode, syncOne, syncAll, list, remove, setAutoSync, decodeCode, selfTest };
+module.exports = { init, stopAll, shareProject, joinWithCode, syncOne, syncAll, list, remove, setAutoSync, decodeCode, selfTest, isHelmShareUrl };

@@ -132,6 +132,40 @@ const memDirFor = (home, proj) => path.join(home, '.claude', 'projects', proj.re
   const husk = partner.joinWithCode(code, projectsD);
   check('empty leftover folder is reused', husk.ok && !husk.renamed && path.basename(husk.path) === 'client-site', husk.error || husk.path);
 
+  console.log('\n[6] a project with its own remote shares via helm-share, origin untouched');
+  check('helm repo URLs recognized (https)', partner.isHelmShareUrl('https://github.com/u/helm-dionet-ab12c'));
+  check('helm repo URLs recognized (.git)', partner.isHelmShareUrl('https://github.com/u/helm-client-site-x.git'));
+  check('helm repo URLs recognized (ssh)', partner.isHelmShareUrl('git@github.com:u/helm-site-9z.git'));
+  check('own repos NOT treated as share repos', !partner.isHelmShareUrl('https://github.com/u/claude-helm') && !partner.isHelmShareUrl('https://github.com/u/dionet'));
+
+  // syncOne must honor entry.remote: edits flow through the share remote only
+  partner.init(A.env);
+  const ownRemote = path.join(tmp, 'own-remote.git');
+  sh(tmp, 'git', ['init', '--bare', ownRemote]);
+  const shareRemote = path.join(tmp, 'share-remote.git');
+  sh(tmp, 'git', ['init', '--bare', shareRemote]);
+  const projE = path.join(tmp, 'projects-E', 'has-own-repo');
+  write(path.join(projE, 'app.js'), 'console.log(1)');
+  write(path.join(projE, '.env'), 'SECRET=topsecret');
+  write(path.join(projE, '.gitignore'), '.env\n');
+  sh(projE, 'git', ['init']);
+  sh(projE, 'git', ['remote', 'add', 'origin', ownRemote]);
+  sh(projE, 'git', ['remote', 'add', 'helm-share', shareRemote]);
+  sh(projE, 'git', ['add', '-A']);
+  sh(projE, 'git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'own work']);
+  const brE = sh(projE, 'git', ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
+  sh(projE, 'git', ['push', 'origin', brE]); // the project's own repo has the clean version
+  sh(projE, 'git', ['push', '-u', 'helm-share', brE]);
+  const entryE = { projectPath: projE, name: 'has-own-repo', url: shareRemote, role: 'owner', remote: 'helm-share', autoSync: true };
+  const cfgA = A.cfg(); cfgA.partners = [entryE]; A.env.saveConfig(cfgA);
+  write(path.join(projE, 'feature.js'), 'console.log(2)');
+  partner.syncOne(entryE);
+  const shareTree = sh(projE, 'git', ['ls-tree', '-r', '--name-only', 'helm-share/' + brE]).stdout;
+  const ownTree = sh(projE, 'git', ['ls-tree', '-r', '--name-only', 'origin/' + brE]).stdout;
+  check('sync pushed to the share remote', shareTree.includes('feature.js'), shareTree);
+  check('share remote carries the env file', shareTree.includes('.env'));
+  check('the project\'s own remote did NOT receive sync commits', !ownTree.includes('feature.js') && !ownTree.includes('.helm-context'), ownTree);
+
   partner.stopAll();
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL TESTS PASSED');

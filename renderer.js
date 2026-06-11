@@ -737,20 +737,44 @@ function openPartnerShareModal() {
     <h3>Share a project with a partner</h3>
     <p class="modal-sub">Creates a private GitHub repo, pushes the project + your Claude context, and gives you a partner code. Needs the GitHub CLI (<code>gh</code>) signed in.</p>
     <select id="ptProject" class="filter-sel" style="width:100%">${all.map((p) => `<option value="${escapeHtml(p.path)}">${escapeHtml(p.name)}</option>`).join('')}</select>
-    <input id="ptGithub" type="text" placeholder="Partner's GitHub username (optional — grants repo access)" autocomplete="off" spellcheck="false" style="margin-top:10px" />
+    <input id="ptGithub" type="text" placeholder="Partner's GitHub username — needed so they can open the private repo" autocomplete="off" spellcheck="false" style="margin-top:10px" />
     <div class="modal-actions">
       <button class="btn ghost pt-cancel">Cancel</button>
       <button class="btn primary pt-go">Share</button>
     </div>`);
   el.querySelector('.pt-cancel').addEventListener('click', close);
   el.querySelector('.pt-go').addEventListener('click', async (ev) => {
-    const btn = ev.currentTarget; btn.disabled = true; btn.textContent = 'Sharing… (can take a minute)';
-    const r = await window.launcher.partnerShare(el.querySelector('#ptProject').value, el.querySelector('#ptGithub').value.trim());
+    const btn = ev.currentTarget;
+    const ghUser = el.querySelector('#ptGithub').value.trim();
+    const showErr = (text) => {
+      let err = el.querySelector('.pt-err');
+      if (!err) { err = document.createElement('p'); err.className = 'pt-err'; el.querySelector('.modal-actions').before(err); }
+      err.textContent = text;
+    };
+    // the repo is private — without their username the partner's clone is dead on arrival
+    if (!ghUser && !btn.dataset.confirmedBlank) {
+      btn.dataset.confirmedBlank = '1';
+      showErr('No GitHub username: your partner won’t be able to clone until you add them as a collaborator yourself. Click Share again to continue anyway.');
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Sharing… (can take a minute)';
+    const r = await window.launcher.partnerShare(el.querySelector('#ptProject').value, ghUser);
+    if (!r || !r.ok) {
+      // failure stays on screen — a toast behind a closing modal reads as "nothing happened"
+      btn.disabled = false; btn.textContent = 'Share';
+      showErr((r && r.error) || 'Share failed.');
+      return;
+    }
     close();
-    if (!r || !r.ok) { showStatus((r && r.error) || 'Share failed.', 'warn'); return; }
+    const accessLine = r.invited
+      ? ` GitHub access granted to <strong>${escapeHtml(r.invited)}</strong>.`
+      : r.inviteError
+        ? ` <strong style="color:#b3402a">Couldn’t grant access to ${escapeHtml(ghUser)}</strong> (${escapeHtml(r.inviteError)}) — fix the username and Share again, or add them as a collaborator on GitHub. Until then their clone will fail.`
+        : ' You left the GitHub username blank — add your partner as a collaborator on the repo or their clone will fail.';
+    const sideLine = r.sideRemote ? '<br><br>This project has its own git remote, so the share lives on a separate private repo (remote <code>helm-share</code>) — your original remote is untouched.' : '';
     const m = popModal(`
       <h3>Partner code ready</h3>
-      <p class="modal-sub">Send this code to your partner. In their Claude Helm: Clients &amp; Partners → <strong>Join with a code</strong>.${r.invited ? ` GitHub access granted to <strong>${escapeHtml(r.invited)}</strong>.` : ' If you left their GitHub username blank, add them as a collaborator on the repo so the clone works.'}</p>
+      <p class="modal-sub">Send this code to your partner. In their Claude Helm: Clients &amp; Partners → <strong>Join with a code</strong>.${accessLine}${sideLine}</p>
       <textarea readonly rows="3" style="width:100%;font-family:monospace;font-size:11px">${escapeHtml(r.code)}</textarea>
       <div class="modal-actions">
         <button class="btn primary pt-copy">Copy code</button>

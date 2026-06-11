@@ -3,6 +3,13 @@
 All notable changes to Claude Helm are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `package.json` semver.
 
+## [1.19.2] - 2026-06-10
+
+### Fixed
+- **Share works "off rip" on any project, safely.** Sharing a project that already had its own git remote used to push the share — including force-added `.env` secrets — straight to that remote (public repos included). Shares now always live on their own private `helm-*` repo: projects with an existing remote get a separate `helm-share` remote and the original is never touched (covered by tests).
+- **A failed collaborator invite is now loud.** The share repo is private, so if granting your partner access fails (typo'd username), their clone is guaranteed to fail — Helm used to report success anyway. The code-ready dialog now shows exactly what failed and how to fix it, and warns before sharing with no username at all.
+- **Share errors stay inside the dialog** (same fix Join got in 1.19.1) instead of flashing as a toast behind the closing window.
+
 ## [1.19.1] - 2026-06-10
 
 ### Fixed
