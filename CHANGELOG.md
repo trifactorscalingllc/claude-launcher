@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · versions follow the `
 
 ## [Unreleased]
 
+### Added
+- **Copy session as Markdown** — export any conversation as clean Markdown: "Copy Markdown" and "Save .md…" in the transcript viewer (with an optional include-thinking toggle), plus a Copy button on every session row in project detail. Exports the full transcript with no display caps; tool calls and results render as code blocks.
+
 ### Fixed
 - **Token, cost and turn counts were ~3× too high** — Claude Code logs one transcript line per assistant content block, each repeating the same message id and usage, and continuation/fork session files replay the parent session's lines verbatim. Helm counted every line every time. The indexer now processes each line and each API call exactly once across all files (verified against real history: $9,002 shown → $2,723 actual). All history recomputes on first launch after update.
 - **Active time was inflated too** — replayed history in continuation files re-counted the same working gaps (~15% high); now counted once.

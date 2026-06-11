@@ -1303,64 +1303,40 @@ ipcMain.handle('list-projects', (_e, root) => {
 ipcMain.handle('project-stats', (_e, projectPath) => projectStats(projectPath));
 
 // ---- Transcript viewer: parse a session .jsonl into a readable conversation ----
-function summarizeToolInput(b) {
-  const i = b.input || {};
-  if (i.file_path) return i.file_path;
-  if (i.path) return i.path;
-  if (i.command) return String(i.command).replace(/\s+/g, ' ').slice(0, 140);
-  if (i.pattern) return String(i.pattern).slice(0, 100);
-  if (i.query) return String(i.query).slice(0, 100);
-  if (i.url) return String(i.url).slice(0, 120);
-  if (i.description) return String(i.description).slice(0, 120);
-  const s = JSON.stringify(i);
-  return s.length > 2 ? s.slice(0, 120) : '';
-}
-function resultText(b) {
-  const c = b.content;
-  if (typeof c === 'string') return c;
-  if (Array.isArray(c)) return c.map((x) => (x && x.text) || '').join('\n');
-  return '';
-}
+const { parseTranscript, transcriptToMarkdown } = require('./transcript');
 
 ipcMain.handle('read-transcript', async (_e, { filePath, cwd, sessionId }) => {
   const file = filePath || (cwd && sessionId ? indexer.sessionFile(cwd, sessionId) : null);
   if (!file) return { error: 'Session file not found', messages: [] };
-  let content;
-  try { content = await fsp.readFile(file, 'utf8'); } catch (err) { return { error: err.message, messages: [] }; }
+  const d = await parseTranscript(file);
+  return { ...d, project: d.project || cwd || '', sessionId: sessionId || '', file };
+});
 
-  const messages = [];
-  let title = '';
-  let project = cwd || '';
-  const MAX = 2000;
-  let truncated = false;
+// ---- Export a session as Markdown ----
+ipcMain.handle('transcript-markdown', async (_e, { filePath, cwd, sessionId, thinking }) => {
+  const file = filePath || (cwd && sessionId ? indexer.sessionFile(cwd, sessionId) : null);
+  if (!file) return { ok: false, error: 'Session file not found' };
+  // a file, not a screen — no display caps
+  const d = await parseTranscript(file, { maxMessages: Infinity, textCap: Infinity, resultCap: Infinity, thinkCap: Infinity });
+  if (d.error) return { ok: false, error: d.error };
+  if (!d.messages.length) return { ok: false, error: 'No readable messages in this session.' };
+  d.project = d.project || cwd || '';
+  d.sessionId = sessionId || '';
+  const { markdown, suggestedName } = transcriptToMarkdown(d, { thinking: !!thinking });
+  return { ok: true, markdown, suggestedName };
+});
 
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-    let o;
-    try { o = JSON.parse(line); } catch { continue; }
-    if (o.aiTitle && !title) title = o.aiTitle;
-    if (o.cwd && !project) project = o.cwd;
-    if (o.type !== 'user' && o.type !== 'assistant') continue;
-    const ts = o.timestamp ? Date.parse(o.timestamp) : 0;
-    const c = o.message && o.message.content;
-    const blocks = [];
-    if (typeof c === 'string') {
-      if (c.trim()) blocks.push({ kind: 'text', text: c.slice(0, 6000) });
-    } else if (Array.isArray(c)) {
-      for (const b of c) {
-        if (!b) continue;
-        if (b.type === 'text' && b.text && b.text.trim()) blocks.push({ kind: 'text', text: b.text.slice(0, 6000) });
-        else if (b.type === 'tool_use') blocks.push({ kind: 'tool', name: b.name, summary: summarizeToolInput(b) });
-        else if (b.type === 'tool_result') { const t = resultText(b).trim(); if (t) blocks.push({ kind: 'result', text: t.slice(0, 2000), error: !!b.is_error, truncated: t.length > 2000 }); }
-        else if (b.type === 'thinking' && b.thinking && b.thinking.trim()) blocks.push({ kind: 'thinking', text: b.thinking.slice(0, 4000) });
-      }
-    }
-    if (!blocks.length) continue;
-    messages.push({ role: o.type, ts, blocks });
-    if (messages.length >= MAX) { truncated = true; break; }
-  }
-
-  return { messages, title, project, sessionId: sessionId || '', file, truncated, error: null };
+ipcMain.handle('save-markdown', async (_e, { markdown, suggestedName }) => {
+  try {
+    const res = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save conversation as Markdown',
+      defaultPath: suggestedName || 'session.md',
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: true, canceled: true };
+    await fsp.writeFile(res.filePath, markdown, 'utf8');
+    return { ok: true, path: res.filePath };
+  } catch (err) { return { ok: false, error: err.message }; }
 });
 
 ipcMain.handle('project-metrics', (_e, projectPath) => {

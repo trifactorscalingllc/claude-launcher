@@ -1271,6 +1271,25 @@ function switchView(view) {
 // ---------- Transcript viewer ----------
 let transcriptReturn = 'projects';
 let currentTranscriptCtx = null; // { cwd, sessionId } for Branch/Resume
+let currentTranscriptArgs = null; // raw args of the open transcript, for Markdown export
+let currentTranscriptReadable = false;
+
+// Copy or save the open transcript as Markdown (shared by the header buttons).
+async function exportTranscriptMarkdown(save) {
+  if (!currentTranscriptArgs || !currentTranscriptReadable) return;
+  const thinking = !!($('tMdThink') && $('tMdThink').checked);
+  const r = await window.launcher.transcriptMarkdown({ ...currentTranscriptArgs, thinking });
+  if (!r || !r.ok) { showStatus((r && r.error) || 'Could not build Markdown.', 'warn'); return; }
+  if (save) {
+    const s = await window.launcher.saveMarkdown({ markdown: r.markdown, suggestedName: r.suggestedName });
+    if (s && s.ok && s.canceled) return;
+    if (s && s.ok) showStatus(`Saved ${s.path}`, 'ok');
+    else showStatus((s && s.error) || 'Could not save the file.', 'warn');
+  } else {
+    await window.launcher.copyText(r.markdown);
+    showStatus('Conversation copied as Markdown.', 'ok');
+  }
+}
 
 function renderMessage(m) {
   const who = m.role === 'user' ? 'You' : 'Claude';
@@ -1297,13 +1316,22 @@ async function openTranscript(args, fromView, scrollTs) {
   bodyEl.innerHTML = '<p class="empty">Loading conversation…</p>';
 
   const d = await window.launcher.readTranscript(args);
-  // capture session context for Branch / Resume
+  // capture session context for Branch / Resume / Markdown export
   const ctxCwd = args.cwd || d.project || '';
   const ctxSession = args.sessionId || d.sessionId || '';
   currentTranscriptCtx = (ctxCwd && ctxSession) ? { cwd: ctxCwd, sessionId: ctxSession } : null;
+  currentTranscriptArgs = args;
+  currentTranscriptReadable = !d.error && d.messages.length > 0;
   const tBranch = root.querySelector('.t-branch');
   const tResume = root.querySelector('.t-resume');
   [tBranch, tResume].forEach((b) => { if (b) b.disabled = !currentTranscriptCtx; });
+  [root.querySelector('.t-md'), root.querySelector('.t-save')].forEach((b) => {
+    if (!b) return;
+    b.disabled = !currentTranscriptReadable;
+    b.title = currentTranscriptReadable
+      ? (b.classList.contains('t-md') ? 'Copy this conversation as Markdown' : 'Save this conversation as a .md file')
+      : 'Nothing readable to export in this session';
+  });
   if (d.error || !d.messages.length) {
     root.querySelector('.t-title').textContent = 'Session';
     bodyEl.innerHTML = `<p class="empty">${escapeHtml(d.error || 'No readable messages in this session.')}</p>`;
@@ -1849,6 +1877,7 @@ async function openDetail(p) {
             <div class="s-title">${escapeHtml(s.title || 'Untitled session')} <span class="s-open">read ›</span></div>
             <div class="s-meta">${relTime(s.lastTs)} · ${fmtDuration(s.activeMs)} · ${s.turns} turns</div>
           </div>
+          <button class="s-copy" title="Copy this conversation as Markdown">${svg('file', 14)} Copy</button>
           <button class="s-resume" title="Reopen this exact conversation in Claude Code (claude --resume)">${svg('repeat', 14)} Resume</button>
           <button class="s-branch" title="Fork this conversation into a new Claude Code session (original untouched)">${svg('branch', 14)} Branch</button>
         </div>`).join('')}
@@ -1904,6 +1933,13 @@ async function openDetail(p) {
       const r = await window.launcher.branchSession(p.path, row.dataset.session);
       if (r && r.ok) showStatus('Branched — a new forked session is opening in Claude Code. The original is untouched.', 'ok');
       else showStatus((r && r.error) || 'Could not branch this session.', 'warn');
+    });
+    const cp = row.querySelector('.s-copy');
+    if (cp) cp.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const r = await window.launcher.transcriptMarkdown({ cwd: p.path, sessionId: row.dataset.session });
+      if (r && r.ok) { await window.launcher.copyText(r.markdown); showStatus('Session copied as Markdown.', 'ok'); }
+      else showStatus((r && r.error) || 'Could not copy this session.', 'warn');
     });
   });
 }
@@ -2777,6 +2813,8 @@ async function init() {
     n.addEventListener('click', () => switchView(n.dataset.view)));
   document.querySelector('#view-detail .back-btn').addEventListener('click', () => switchView('projects'));
   document.querySelector('#view-transcript .t-back').addEventListener('click', () => switchView(transcriptReturn));
+  document.querySelector('#view-transcript .t-md').addEventListener('click', () => exportTranscriptMarkdown(false));
+  document.querySelector('#view-transcript .t-save').addEventListener('click', () => exportTranscriptMarkdown(true));
   document.querySelector('#view-transcript .t-branch').addEventListener('click', async () => {
     if (!currentTranscriptCtx) return;
     const r = await window.launcher.branchSession(currentTranscriptCtx.cwd, currentTranscriptCtx.sessionId);

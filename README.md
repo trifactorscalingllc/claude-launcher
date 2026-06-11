@@ -64,6 +64,7 @@ Update behavior while unsigned: **Windows auto-updates silently in place.** macO
 - **Project results pull the project right up** — open it in Claude or jump to its details from the result row.
 - **Suggested searches mined from your usage** — recurring session themes, recent projects, most-edited files, top tools. The empty search tab recommends what you were probably about to type.
 - **In-app transcript viewer** — read any conversation as a clean chat, then Resume or Branch it (`--resume … --fork-session`, original untouched).
+- **Copy any session as Markdown** — one click in the viewer (or on a session row) copies the whole conversation as clean Markdown, or save it as a `.md` file; thinking blocks optional.
 
 ### 📊 Analytics & money
 - **Per-project time, cost, tokens, tools, files, and models** — live-updating cards with sparklines, a live "● active" dot, git status, and a deep-dive detail view with per-day charts.

@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('launcher', {
     return () => ipcRenderer.removeListener('rescue-progress', h);
   },
   readTranscript: (args) => ipcRenderer.invoke('read-transcript', args),
+  transcriptMarkdown: (args) => ipcRenderer.invoke('transcript-markdown', args),
+  saveMarkdown: (args) => ipcRenderer.invoke('save-markdown', args),
   branchSession: (cwd, sessionId) => ipcRenderer.invoke('branch-session', cwd, sessionId),
   resumeSession: (cwd, sessionId) => ipcRenderer.invoke('resume-session', cwd, sessionId),
   gitStatus: (projectPath) => ipcRenderer.invoke('git-status', projectPath),

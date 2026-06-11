@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node test-preview.js && node test-partner.js",
+    "test": "node test-indexer.js && node test-transcript.js && node test-preview.js && node test-partner.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win",
     "dist:mac": "electron-builder --mac"
@@ -30,6 +30,7 @@
     "files": [
       "main.js",
       "indexer.js",
+      "transcript.js",
       "preload.js",
       "preview.js",
       "agents.js",
